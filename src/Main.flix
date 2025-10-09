@@ -46,9 +46,24 @@ mod TodoApi {
     /// Handler functions - all with {TodoStorage, IO} effect
     ///
     def getAllTodos(_params: Map[String, String]): Result[RestApi.ApiError, List[Todo]] \ {TodoStorage, IO} = {
-        let todos = TodoStorage.getAllTodos();
-        println("Fetched todos: ${todos}");
-        Ok(todos)
+        println("Fetching all todos");
+        run {
+            let todos = TodoStorage.getAllTodos();
+            println("Fetched todos: ${todos}");
+            Ok(todos)
+        } with handler TodoStorage {
+            def getAllTodos(_, resume) = 
+                let todos = List#{
+                    Todo.create(TodoId.TodoId("demo-1"), TodoText.TodoText("Learn effect-oriented programming")),
+                    Todo.create(TodoId.TodoId("demo-2"), TodoText.TodoText("Build a todo app")),  
+                    Todo.create(TodoId.TodoId("demo-3"), TodoText.TodoText("Master HTMX integration"))
+                };
+                resume(todos)
+            
+            def saveTodos(_todos, resume) = {
+                resume()
+            }
+        }
     }
     
     def getTodoById(params: Map[String, String]): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
@@ -103,11 +118,12 @@ mod TodoApi {
 ///
 /// Main entry point
 ///
-def main(): Unit \ IO = region rc {
-    let initialTodos = AppConfig.getInitialTodos(AppConfig.webApp(8080));
-    let stateRef = Ref.fresh(rc, initialTodos);
+def main(): Unit \ IO = 
+// region rc {
+    // let initialTodos = AppConfig.getInitialTodos(AppConfig.webApp(8080));
+    // let stateRef = Ref.fresh(rc, initialTodos);
     
-    run {
-        RestApi.Server.serve(8080, TodoApi.api())
-    } with TodoStorageHandler.runWithState(stateRef)
-}
+    // run {
+    RestApi.Server.serve(8080, TodoApi.api())
+    // } with TodoStorageHandler.runWithState(stateRef)
+// }
