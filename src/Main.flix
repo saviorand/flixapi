@@ -26,47 +26,19 @@ mod TodoApi {
     }
     
     ///
-    /// Define API routes
+    /// Handler: Get all todos
     ///
-    pub def routes(): List[Route[{TodoStorage, IO}]] = List#{
-        // GET /todos - List all todos
-        RestApi.get("/todos", jsonHandler(getAllTodos)),
-        
-        // GET /todos/{id} - Get specific todo
-        RestApi.get("/todos/{id}", jsonHandler(getTodoById)),
-        
-        // POST /todos - Create new todo
-        RestApi.post("/todos", jsonBodyHandler(createTodo)),
-        
-        // DELETE /todos/{id} - Delete todo
-        RestApi.delete("/todos/{id}", jsonHandler(deleteTodoById))
-    }
-    
-    ///
-    /// Handler functions - all with {TodoStorage, IO} effect
-    ///
-    def getAllTodos(_params: Map[String, String]): Result[RestApi.ApiError, List[Todo]] \ {TodoStorage, IO} = {
+    pub def getAllTodos(_params: Map[String, String]): Result[RestApi.ApiError, List[Todo]] \ {TodoStorage, IO} = {
         println("Fetching all todos");
-        run {
-            let todos = TodoStorage.getAllTodos();
-            println("Fetched todos: ${todos}");
-            Ok(todos)
-        } with handler TodoStorage {
-            def getAllTodos(_, resume) = 
-                let todos = List#{
-                    Todo.create(TodoId.TodoId("demo-1"), TodoText.TodoText("Learn effect-oriented programming")),
-                    Todo.create(TodoId.TodoId("demo-2"), TodoText.TodoText("Build a todo app")),  
-                    Todo.create(TodoId.TodoId("demo-3"), TodoText.TodoText("Master HTMX integration"))
-                };
-                resume(todos)
-            
-            def saveTodos(_todos, resume) = {
-                resume()
-            }
-        }
+        let todos = TodoStorage.getAllTodos();
+        println("Fetched todos: ${todos}");
+        Ok(todos)
     }
     
-    def getTodoById(params: Map[String, String]): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
+    ///
+    /// Handler: Get todo by ID
+    ///
+    pub def getTodoById(params: Map[String, String]): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
         let id = Map.getWithDefault("id", "", params);
         println("Fetching todo with id: ${id}");
         match TodoService.findTodo(id, TodoStorage.getAllTodos()) {
@@ -75,7 +47,10 @@ mod TodoApi {
         }
     }
     
-    def createTodo(req: CreateTodoRequest): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
+    ///
+    /// Handler: Create a new todo
+    ///
+    pub def createTodo(req: CreateTodoRequest): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
         let CreateTodoRequest.CreateTodoRequest(text) = req;
         let todos = TodoStorage.getAllTodos();
         match TodoService.addTodo(text, todos) {
@@ -88,7 +63,10 @@ mod TodoApi {
         }
     }
     
-    def deleteTodoById(params: Map[String, String]): Result[RestApi.ApiError, String] \ {TodoStorage, IO} = {
+    ///
+    /// Handler: Delete todo by ID
+    ///
+    pub def deleteTodoById(params: Map[String, String]): Result[RestApi.ApiError, String] \ {TodoStorage, IO} = {
         let id = Map.getWithDefault("id", "", params);
         let todos = TodoStorage.getAllTodos();
         println("Deleting todo with id: ${id}");
@@ -101,29 +79,36 @@ mod TodoApi {
                 Err(RestApi.ApiError.NotFound("Todo not found"))
         }
     }
-    
-    ///
-    /// Create API configuration
-    ///
-    pub def api(): Api[{TodoStorage, IO}] = {
-        RestApi.Api.Api({
-            title = "Todo API",
-            version = "1.0.0",
-            description = "A simple todo list API built with Flix",
-            routes = routes()
-        })
-    }
 }
 
 ///
 /// Main entry point
 ///
-def main(): Unit \ IO = 
-// region rc {
-    // let initialTodos = AppConfig.getInitialTodos(AppConfig.webApp(8080));
-    // let stateRef = Ref.fresh(rc, initialTodos);
+def main(): Unit \ IO = region rc {
+    let initialTodos = AppConfig.getInitialTodos(AppConfig.webApp(8080));
+    let stateRef = Ref.fresh(rc, initialTodos);
     
-    // run {
-    RestApi.Server.serve(8080, TodoApi.api())
-    // } with TodoStorageHandler.runWithState(stateRef)
-// }
+    // Helper function to wrap route handlers with effect handlers
+    def withEffects(routeHandler) = (params, queryParams, bodyOpt) -> {
+        run {
+            routeHandler(params, queryParams, bodyOpt)
+        } with TodoStorageHandler.runWithState(stateRef)
+    };
+    
+    // Define routes with effects applied
+    let routes = List#{
+        RestApi.get("/todos", 
+            withEffects(RestApi.Json.jsonHandler(TodoApi.getAllTodos))),
+        
+        RestApi.get("/todos/{id}", 
+            withEffects(RestApi.Json.jsonHandler(TodoApi.getTodoById))),
+        
+        RestApi.post("/todos", 
+            withEffects(RestApi.Json.jsonBodyHandler(TodoApi.createTodo))),
+        
+        RestApi.delete("/todos/{id}", 
+            withEffects(RestApi.Json.jsonHandler(TodoApi.deleteTodoById)))
+    };
+    
+    RestApi.Server.serve(8080, routes)
+}

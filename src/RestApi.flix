@@ -169,21 +169,18 @@ mod RestApi.Server {
     ///
     /// Start the REST API server
     ///
-    pub def serve(port: Int32, api: RestApi.Api[ef]): Unit \ {IO} = {
-        let RestApi.Api.Api(config) = api;
+    pub def serve(port: Int32, routes: List[RestApi.Route[ef]]): Unit \ {IO} = {
         let addr = new InetSocketAddress(port);
         let server = JavaHttpServer.create(addr, 0);
         
-        // Group routes by base path to avoid conflicts
-        let routesByPath = groupRoutesByBasePath(config#routes);
-        Map.forEach((basePath, routes) -> 
-            registerRoutesAtPath(server, basePath, routes), routesByPath);
+        // Group routes by base path
+        let routesByBasePath = groupRoutesByBasePath(routes);
+        Map.forEach((basePath, routesForPath) -> 
+            registerRoutesAtPath(server, basePath, routesForPath), routesByBasePath);
         
-        // Start server
         server.start();
         println("🚀 API Server running on http://localhost:${port}");
         
-        // Keep alive
         try {
             JThread.currentThread().join()
         } catch {
@@ -191,32 +188,37 @@ mod RestApi.Server {
                 println("Server stopped")
         }
     }
-
+    
     ///
     /// Group routes by their base path (without parameters)
     ///
     def groupRoutesByBasePath(routes: List[RestApi.Route[ef]]): Map[String, List[RestApi.Route[ef]]] = {
         List.foldLeft((acc, route) -> {
             let RestApi.Route.Route(_, path, _) = route;
-            let basePath = pathToJavaPattern(path);
+            let basePath = extractBasePath(path);
             let existing = Map.getWithDefault(basePath, Nil, acc);
             Map.insert(basePath, route :: existing, acc)
         }, Map.empty(), routes)
     }
-
+    
+    ///
+    /// Extract base path from a pattern like "/todos/{id}" -> "/todos"
+    ///
+    def extractBasePath(pattern: String): String = {
+        let parts = String.split(regex="/", pattern);
+        let baseParts = List.takeWhile(part -> 
+            not (String.startsWith(prefix="{", part) and String.endsWith(suffix="}", part)), 
+            parts);
+        String.intercalate("/", baseParts)
+    }
+    
     ///
     /// Register all routes at a given base path with a multiplexing handler
     ///
-    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, routes: List[RestApi.Route[ef]]): Unit \ {IO} = {
-        discard server.createContext(basePath, createMultiplexHandler(routes));
-        ()
-    }
-
-    ///
-    /// Create a handler that multiplexes between multiple routes
-    ///
-    def createMultiplexHandler(routes: List[RestApi.Route[ef]]): HttpHandler \ {IO} =
-        new HttpHandler {
+    def registerRoutesAtPath(server: JavaHttpServer, 
+                            basePath: String, 
+                            routes: List[RestApi.Route[ef]]): Unit \ {IO} = {
+        let javaHandler = new HttpHandler {
             def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ {IO, ef} = {
                 let method = exchange.getRequestMethod();
                 let path = exchange.getRequestURI().getPath();
@@ -228,7 +230,7 @@ mod RestApi.Server {
                 }, routes);
                 
                 match matchingRoute {
-                    case Some(RestApi.Route.Route(_, pathPattern, rhandler)) =>
+                    case Some(RestApi.Route.Route(_, pathPattern, rhandler)) => {
                         let params = extractPathParams(pathPattern, path);
                         let qparams = extractQueryParams(exchange);
                         let body = readRequestBody(exchange);
@@ -240,66 +242,16 @@ mod RestApi.Server {
                                 let (status, msg) = RestApi.errorToResponse(err);
                                 writeJsonResponse(exchange, status, msg)
                         }
+                    }
                     case None =>
                         writeResponse(exchange, 404, "Not Found")
                 }
             }
-        }
-
-    ///
-    /// Check if a path matches a pattern
-    ///
-    def pathMatches(pattern: String, path: String): Bool = {
-        let patternParts = String.split(regex="/", pattern);
-        let pathParts = String.split(regex="/", path);
-        
-        if (List.length(patternParts) != List.length(pathParts))
-            false
-        else
-            List.zip(patternParts, pathParts) |> List.forAll(match (pat, val) ->
-                if (String.startsWith(prefix="{", pat))
-                    true  // Parameter matches anything
-                else
-                    pat == val
-            )
+        };
+        discard server.createContext(basePath, javaHandler);
+        ()
     }
     
-    ///
-    /// Convert Flix path pattern to Java path
-    ///
-    def pathToJavaPattern(path: String): String = 
-        // For now, just use the path as-is
-        // TODO: Handle path parameters properly
-        path
-    
-    ///
-    /// Create a Java HttpHandler from a Flix handler
-    ///
-    // def createHttpHandler(expectedMethod: RestApi.Method, pathPattern: String, rhandler: RestApi.RouteHandler[ef]): HttpHandler \ {IO} =
-    // new HttpHandler {
-    //     def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ {IO, ef} = {
-    //         let method = exchange.getRequestMethod();
-    //         let path = exchange.getRequestURI().getPath();
-            
-    //         if (not methodMatches(method, expectedMethod)) {
-    //             writeResponse(exchange, 405, "Method Not Allowed");
-    //             ()
-    //         } else {
-    //             let params = extractPathParams(pathPattern, path);
-    //             let qparams = extractQueryParams(exchange);
-    //             let body = readRequestBody(exchange);
-                
-    //             match rhandler(params, qparams, body) {
-    //                 case Ok((status, responseBody)) =>
-    //                     writeJsonResponse(exchange, status, responseBody)
-    //                 case Err(err) =>
-    //                     let (status, msg) = RestApi.errorToResponse(err);
-    //                     writeJsonResponse(exchange, status, msg)
-    //             }
-    //         }
-    //     }
-    // }
-
     ///
     /// Check if HTTP method matches
     ///
@@ -313,8 +265,25 @@ mod RestApi.Server {
         }
     
     ///
+    /// Check if a path matches a pattern
+    ///
+    def pathMatches(pattern: String, path: String): Bool = {
+        let patternParts = String.split(regex="/", pattern);
+        let pathParts = String.split(regex="/", path);
+        
+        if (List.length(patternParts) != List.length(pathParts))
+            false
+        else
+            List.zip(patternParts, pathParts) |> List.forAll(match (pat, pth) ->
+                if (String.startsWith(prefix="{", pat) and String.endsWith(suffix="}", pat))
+                    true  // Parameter matches anything
+                else
+                    pat == pth
+            )
+    }
+    
+    ///
     /// Extract path parameters from URL
-    /// e.g. pattern="/todos/{id}" path="/todos/123" => Map#{"id" => "123"}
     ///
     def extractPathParams(pattern: String, path: String): Map[String, String] = {
         let patternParts = String.split(regex="/", pattern);
