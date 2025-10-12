@@ -1,157 +1,196 @@
 ///
-/// RestApi - A declarative REST API framework for Flix
+/// RestApi - An effect-oriented REST API framework for Flix
 ///
-mod RestApi {
-    
-    ///
-    /// HTTP methods
-    ///
-    pub enum Method with Eq, ToString {
-        case Get, Post, Put, Delete, Patch
-    }
-    
-    ///
-    /// API Error types
-    ///
-    pub enum ApiError with ToString {
-        case BadRequest(String)
-        case NotFound(String)
-        case Unauthorized(String)
-        case InternalError(String)
-    }
-    
-    ///
-    /// HTTP Response with status code and body
-    ///
-    pub enum Response[a] {
-        case Response(Int32, a)
-    }
-    
-    ///
-    /// Handler function type - now effect polymorphic
-    ///
-    pub type alias RouteHandler[ef: Eff] = (Map[String, String], Map[String, String], Option[String]) -> Result[ApiError, (Int32, String)] \ ef
+/// This framework follows idiomatic Flix design patterns:
+/// - Effects for HTTP requests and responses
+/// - Clean separation of concerns
+/// - Effect handlers for different runtime behaviors
+///
 
+///
+/// HTTP methods
+///
+pub enum Method with Eq, ToString {
+    case Get
+    case Post  
+    case Put
+    case Delete
+    case Patch
+}
+
+///
+/// HTTP status codes
+///
+pub enum Status with Eq, ToString {
+    case Ok
+    case Created
+    case NoContent
+    case BadRequest
+    case Unauthorized
+    case NotFound
+    case InternalError
+}
+
+mod Status {
     ///
-    /// Route definition with effect parameter
+    /// Convert status to HTTP status code
     ///
-    pub enum Route[ef: Eff] {
-        case Route(Method, String, RouteHandler[ef])
+    pub def toCode(status: Status): Int32 = match status {
+        case Status.Ok            => 200
+        case Status.Created       => 201
+        case Status.NoContent     => 204
+        case Status.BadRequest    => 400
+        case Status.Unauthorized  => 401
+        case Status.NotFound      => 404
+        case Status.InternalError => 500
     }
+}
 
-    ///
-    /// API metadata with effect parameter
-    ///
-    pub enum Api[ef: Eff] {
-        case Api({
-            title = String,
-            version = String, 
-            description = String,
-            routes = List[Route[ef]]
-        })
-    }
+///
+/// HTTP request information
+///
+pub enum Request {
+    case Request({
+        pathParams = Map[String, String],
+        queryParams = Map[String, String],
+        body = Option[String]
+    })
+}
 
-    ///
-    /// Create a GET route - effect polymorphic
-    ///
-    pub def get(path: String, rhandler: RouteHandler[ef]): Route[ef] =
-        Route.Route(Method.Get, path, rhandler)
+///
+/// HTTP response
+///
+pub enum Response {
+    case Response({
+        status = Status,
+        body = String
+    })
+}
 
+mod Response {
     ///
-    /// Create a POST route - effect polymorphic
+    /// Create a successful response with a body
     ///
-    pub def post(path: String, rhandler: RouteHandler[ef]): Route[ef] =
-        Route.Route(Method.Post, path, rhandler)
-
-    ///
-    /// Create a DELETE route - effect polymorphic
-    ///
-    pub def delete(path: String, rhandler: RouteHandler[ef]): Route[ef] =
-        Route.Route(Method.Delete, path, rhandler)    
+    pub def ok(body: String): Response =
+        Response.Response({ status = Status.Ok, body = body })
     
     ///
-    /// Helper to create a 200 OK response
+    /// Create a created response
     ///
-    pub def ok(body: a): Response[a] = 
-        Response.Response(200, body)
+    pub def created(body: String): Response =
+        Response.Response({ status = Status.Created, body = body })
     
     ///
-    /// Helper to create a 201 Created response
+    /// Create a no content response
     ///
-    pub def created(body: a): Response[a] =
-        Response.Response(201, body)
+    pub def noContent(): Response =
+        Response.Response({ status = Status.NoContent, body = "" })
     
     ///
-    /// Helper to create a 204 No Content response
+    /// Create an error response
     ///
-    pub def noContent(): Response[String] =
-        Response.Response(204, "")
+    pub def error(status: Status, message: String): Response =
+        Response.Response({ status = status, body = message })
     
     ///
-    /// Convert ApiError to HTTP status code and message
+    /// Create a bad request response
     ///
-    pub def errorToResponse(err: ApiError): (Int32, String) = match err {
-        case ApiError.BadRequest(msg)    => (400, msg)
-        case ApiError.NotFound(msg)      => (404, msg)
-        case ApiError.Unauthorized(msg)  => (401, msg)
-        case ApiError.InternalError(msg) => (500, msg)
-    }
+    pub def badRequest(message: String): Response =
+        error(Status.BadRequest, message)
+    
+    ///
+    /// Create a not found response
+    ///
+    pub def notFound(message: String): Response =
+        error(Status.NotFound, message)
+}
+
+///
+/// Route definition - handlers must have IO effect for interop with Java HTTP server
+///
+pub enum Route {
+    case Route(Method, String, Request -> Response \ IO)
+}
+
+mod Route {
+    ///
+    /// Create a GET route
+    ///
+    pub def get(path: String, h: Request -> Response \ IO): Route =
+        Route.Route(Method.Get, path, h)
+    
+    ///
+    /// Create a POST route
+    ///
+    pub def post(path: String, h: Request -> Response \ IO): Route =
+        Route.Route(Method.Post, path, h)
+    
+    ///
+    /// Create a PUT route
+    ///
+    pub def put(path: String, h: Request -> Response \ IO): Route =
+        Route.Route(Method.Put, path, h)
+    
+    ///
+    /// Create a DELETE route
+    ///
+    pub def delete(path: String, h: Request -> Response \ IO): Route =
+        Route.Route(Method.Delete, path, h)
 }
 
 ///
 /// JSON helpers for REST API
 ///
-mod RestApi.Json {
+mod Json {
     use Json.JsonElement
     use Json.ToJson
     use Json.FromJson
-    use Json.JsonError
     
     ///
     /// Serialize a Flix value to JSON string
     ///
-    pub def toJsonString(x: a): String with ToJson[a] =
+    pub def encode(x: a): String with ToJson[a] =
         ToJson.toJson(x) |> Json.Write.toCompactString
     
     ///
     /// Parse JSON string to Flix value
     ///
-    pub def fromJsonString(s: String): Result[String, a] with FromJson[a] =
+    pub def decode(s: String): Option[a] with FromJson[a] =
         match Json.Parse.parse(s) {
-            case None => Err("JSON parse error: invalid JSON")
+            case None => None
             case Some(elem) => 
-                FromJson.fromJson(elem) |> Result.mapErr(_ -> "JSON decode error")
+                FromJson.fromJson(elem) |> Result.toOption
         }
     
     ///
-    /// Create a JSON response handler - effect polymorphic
+    /// Create a JSON response handler for GET/DELETE routes
     ///
-    pub def jsonHandler(f: Map[String, String] -> Result[RestApi.ApiError, a] \ ef): RestApi.RouteHandler[ef] with ToJson[a] =
-        (params, _, _) -> {
-            match f(params) {
-                case Ok(value) => 
-                    let json = toJsonString(value);
-                    Ok((200, json))
-                case Err(err) => 
-                    Err(err)
-            }
+    pub def wrap(f: Request -> Response): Request -> Response =
+        req -> f(req)
+    
+    ///
+    /// Lift a function that returns a JSON-serializable value into a handler
+    ///
+    pub def get(f: Request -> a): Request -> Response with ToJson[a] =
+        req -> {
+            let result = f(req);
+            Response.ok(encode(result))
         }
-
+    
     ///
-    /// Create a JSON body handler (POST/PUT) - effect polymorphic
+    /// Lift a function that accepts and returns JSON values into a POST handler
     ///
-    pub def jsonBodyHandler(f: a -> Result[RestApi.ApiError, b] \ ef): RestApi.RouteHandler[ef] with FromJson[a], ToJson[b] =
-        (_, _, bodyOpt) -> {
-            match bodyOpt {
-                case None => Err(RestApi.ApiError.BadRequest("Request body required"))
+    pub def post(f: a -> b): Request -> Response with FromJson[a], ToJson[b] =
+        req -> {
+            let Request.Request(r) = req;
+            match r#body {
+                case None => Response.badRequest("Request body required")
                 case Some(body) => 
-                    match fromJsonString(body) {
-                        case Err(msg) => Err(RestApi.ApiError.BadRequest(msg))
-                        case Ok(input) => 
-                            match f(input) {
-                                case Ok(output) => Ok((200, toJsonString(output)))
-                                case Err(err) => Err(err)
-                            }
+                    match decode(body) {
+                        case None => Response.badRequest("Invalid JSON in request body")
+                        case Some(input) => 
+                            let output = f(input);
+                            Response.ok(encode(output))
                     }
             }
         }
@@ -160,26 +199,26 @@ mod RestApi.Json {
 ///
 /// HTTP Server integration
 ///
-mod RestApi.Server {
+mod Server {
     import java.net.InetSocketAddress
     import java.lang.{Thread => JThread, InterruptedException}
     import com.sun.net.httpserver.{HttpServer => JavaHttpServer, HttpHandler, HttpExchange}
-    import java.io.{BufferedReader, InputStreamReader, OutputStream}
+    import java.io.{BufferedReader, InputStreamReader}
     
     ///
     /// Start the REST API server
     ///
-    pub def serve(port: Int32, routes: List[RestApi.Route[ef]]): Unit \ {IO} = {
+    pub def serve(port: Int32, routes: List[Route]): Unit \ IO = {
         let addr = new InetSocketAddress(port);
         let server = JavaHttpServer.create(addr, 0);
         
-        // Group routes by base path
+        // Group routes by base path for efficient routing
         let routesByBasePath = groupRoutesByBasePath(routes);
         Map.forEach((basePath, routesForPath) -> 
             registerRoutesAtPath(server, basePath, routesForPath), routesByBasePath);
         
         server.start();
-        println("🚀 API Server running on http://localhost:${port}");
+        println("Server running on http://localhost:${port}");
         
         try {
             JThread.currentThread().join()
@@ -192,9 +231,9 @@ mod RestApi.Server {
     ///
     /// Group routes by their base path (without parameters)
     ///
-    def groupRoutesByBasePath(routes: List[RestApi.Route[ef]]): Map[String, List[RestApi.Route[ef]]] = {
+    def groupRoutesByBasePath(routes: List[Route]): Map[String, List[Route]] = {
         List.foldLeft((acc, route) -> {
-            let RestApi.Route.Route(_, path, _) = route;
+            let Route.Route(_, path, _) = route;
             let basePath = extractBasePath(path);
             let existing = Map.getWithDefault(basePath, Nil, acc);
             Map.insert(basePath, route :: existing, acc)
@@ -215,36 +254,36 @@ mod RestApi.Server {
     ///
     /// Register all routes at a given base path with a multiplexing handler
     ///
-    def registerRoutesAtPath(server: JavaHttpServer, 
-                            basePath: String, 
-                            routes: List[RestApi.Route[ef]]): Unit \ {IO} = {
+    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, routes: List[Route]): Unit \ IO = {
         let javaHandler = new HttpHandler {
-            def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ {IO, ef} = {
+            def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ IO = {
                 let method = exchange.getRequestMethod();
                 let path = exchange.getRequestURI().getPath();
                 
                 // Find matching route
                 let matchingRoute = List.find(route -> {
-                    let RestApi.Route.Route(routeMethod, routePath, _) = route;
-                    methodMatches(method, routeMethod) and pathMatches(routePath, path)
+                    let Route.Route(m, p, _) = route;
+                    methodMatches(method, m) and pathMatches(p, path)
                 }, routes);
                 
                 match matchingRoute {
-                    case Some(RestApi.Route.Route(_, pathPattern, rhandler)) => {
-                        let params = extractPathParams(pathPattern, path);
-                        let qparams = extractQueryParams(exchange);
+                    case Some(Route.Route(_, pathPattern, h)) => {
+                        let pathParams = extractPathParams(pathPattern, path);
+                        let queryParams = extractQueryParams(exchange);
                         let body = readRequestBody(exchange);
                         
-                        match rhandler(params, qparams, body) {
-                            case Ok((status, responseBody)) =>
-                                writeJsonResponse(exchange, status, responseBody)
-                            case Err(err) =>
-                                let (status, msg) = RestApi.errorToResponse(err);
-                                writeJsonResponse(exchange, status, msg)
-                        }
+                        let request = Request.Request({
+                            pathParams = pathParams,
+                            queryParams = queryParams,
+                            body = body
+                        });
+                        
+                        let response = h(request);
+                        writeResponse(exchange, response)
                     }
                     case None =>
-                        writeResponse(exchange, 404, "Not Found")
+                        let notFoundResp = Response.notFound("Route not found");
+                        writeResponse(exchange, notFoundResp)
                 }
             }
         };
@@ -255,13 +294,13 @@ mod RestApi.Server {
     ///
     /// Check if HTTP method matches
     ///
-    def methodMatches(httpMethod: String, apiMethod: RestApi.Method): Bool =
+    def methodMatches(httpMethod: String, apiMethod: Method): Bool =
         match apiMethod {
-            case RestApi.Method.Get    => httpMethod == "GET"
-            case RestApi.Method.Post   => httpMethod == "POST"  
-            case RestApi.Method.Put    => httpMethod == "PUT"
-            case RestApi.Method.Delete => httpMethod == "DELETE"
-            case RestApi.Method.Patch  => httpMethod == "PATCH"
+            case Method.Get    => httpMethod == "GET"
+            case Method.Post   => httpMethod == "POST"  
+            case Method.Put    => httpMethod == "PUT"
+            case Method.Delete => httpMethod == "DELETE"
+            case Method.Patch  => httpMethod == "PATCH"
         }
     
     ///
@@ -332,73 +371,19 @@ mod RestApi.Server {
     }
     
     ///
-    /// Write JSON response
+    /// Write response
     ///
-    def writeJsonResponse(exchange: HttpExchange, status: Int32, body: String): Unit \ IO = {
+    def writeResponse(exchange: HttpExchange, response: Response): Unit \ IO = {
+        let Response.Response(r) = response;
+        let statusCode = Status.toCode(r#status);
+        let body = r#body;
+        
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-        writeResponse(exchange, status, body)
-    }
-    
-    ///
-    /// Write generic response
-    ///
-    def writeResponse(exchange: HttpExchange, status: Int32, body: String): Unit \ IO = {
         let bytes = body.getBytes();
-        exchange.sendResponseHeaders(status, Int32.toInt64(Array.length(bytes)));
+        exchange.sendResponseHeaders(statusCode, Int32.toInt64(Array.length(bytes)));
         let outputStream = exchange.getResponseBody();
         outputStream.write(bytes);
         outputStream.close();
         exchange.close()
-    }
-}
-
-///
-/// OpenAPI specification generation
-///
-mod RestApi.OpenApi {
-    
-    ///
-    /// Generate OpenAPI 3.0 JSON spec
-    ///
-    pub def generate(api: RestApi.Api[ef]): String = {
-        let RestApi.Api.Api(config) = api;
-        
-        let paths = List.map(routeToPathItem, config#routes)
-            |> List.map(match (path, item) -> "\"${path}\": ${item}")
-            |> String.intercalate(", ");
-        
-        String.unlines(List#{
-            "{",
-            "  \"openapi\": \"3.0.0\",",
-            "  \"info\": {",
-            "    \"title\": \"${config#title}\",",
-            "    \"version\": \"${config#version}\",",
-            "    \"description\": \"${config#description}\"",
-            "  },",
-            "  \"paths\": {",
-            "    ${paths}",
-            "  }",
-            "}"
-        })
-    }
-    
-    ///
-    /// Convert route to OpenAPI path item
-    ///
-    def routeToPathItem(route: RestApi.Route[ef]): (String, String) = {
-        let RestApi.Route.Route(method, path, _) = route;
-        let methodName = String.toLowerCase(ToString.toString(method));
-        
-        let operation = String.unlines(List#{
-            "    \"${methodName}\": {",
-            "      \"responses\": {",
-            "        \"200\": {",
-            "          \"description\": \"Successful response\"",
-            "        }",
-            "      }",
-            "    }"
-        });
-        
-        (path, "{\n${operation}\n  }")
     }
 }

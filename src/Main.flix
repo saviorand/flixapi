@@ -1,315 +1,180 @@
-eff TodoStorage {
-    def getAllTodos(): List[Todo]
-    def saveTodos(todos: List[Todo]): Unit
+///
+/// Simple Todo API Example
+///
+/// This example demonstrates how to use the REST API framework
+/// with effect-oriented programming in Flix.
+///
+
+///
+/// Todo domain model
+///
+pub enum Todo {
+    case Todo({ id = Int32, text = String, completed = Bool })
 }
 
-mod TodoStorageHandler {
-    pub def runWithState(stateRef: Ref[List[Todo], r], f: Unit -> a \ ef): a \ ef - {TodoStorage} + r =
-        run {
-            f()
-        } with handler TodoStorage {
-            def getAllTodos(_, resume) = 
-                let todos = Ref.get(stateRef);
-                resume(todos)
-            
-            def saveTodos(todos, resume) = {
-                Ref.put(todos, stateRef);
-                resume()
-            }
-        }
+instance Eq[Todo] {
+    pub def eq(t1: Todo, t2: Todo): Bool = 
+        let Todo.Todo(r1) = t1;
+        let Todo.Todo(r2) = t2;
+        r1#id == r2#id
 }
 
-enum TodoId with Eq, Order, ToString {
-    case TodoId(String)
-}
-
-enum TodoText with Eq, ToString {
-    case TodoText(String)
-}
-
-enum TodoStatus with Eq, ToString {
-    case Active,
-    case Completed
-}
-
-enum Todo with Eq, ToString {
-    case Todo(TodoId, TodoText, TodoStatus)
-}
-
-mod Todo {
-    
-    pub def create(id: TodoId, text: TodoText): Todo = 
-        Todo(id, text, TodoStatus.Active)
-    
-    pub def getId(todo: Todo): TodoId = 
-        let Todo(id, _, _) = todo;
-        id
-    
-    pub def getText(todo: Todo): TodoText = 
-        let Todo(_, text, _) = todo;
-        text
-    
-    pub def getStatus(todo: Todo): TodoStatus = 
-        let Todo(_, _, status) = todo;
-        status
-    
-    pub def isCompleted(todo: Todo): Bool = 
-        getStatus(todo) == TodoStatus.Completed
-    
-    pub def toggle(todo: Todo): Todo = 
-        let Todo(id, text, status) = todo;
-        let newStatus = match status {
-            case TodoStatus.Active => TodoStatus.Completed
-            case TodoStatus.Completed => TodoStatus.Active
-        };
-        Todo(id, text, newStatus)
-    
-    pub def complete(todo: Todo): Todo = 
-        let Todo(id, text, _) = todo;
-        Todo(id, text, TodoStatus.Completed)
-    
-    pub def activate(todo: Todo): Todo = 
-        let Todo(id, text, _) = todo;
-        Todo(id, text, TodoStatus.Active)
-}
-
-mod TodoService {
-    import java.util.UUID;
-    
-    pub def addTodo(text: String, todos: List[Todo]): Result[TodoError, (Todo, List[Todo])] \ IO =
-        forM(
-            validText <- TodoValidation.validateText(text) |> Result.mapErr(TodoError.ValidationError);
-            newId <- generateUniqueId(todos)
-        ) yield {
-            let newTodo = Todo.create(newId, validText);
-            (newTodo, newTodo :: todos)
-        }
-    
-    pub def updateTodo(idStr: String, updateFn: Todo -> Todo, todos: List[Todo]): Result[TodoError, (Option[Todo], List[Todo])] =
-        match TodoValidation.validateId(idStr) {
-            case Ok(validId) => Ok(updateTodoInList(validId, updateFn, todos))
-            case Err(e) => Err(TodoError.ValidationError(e))
-        }
-
-    pub def deleteTodo(idStr: String, todos: List[Todo]): Result[TodoError, List[Todo]] =
-        match TodoValidation.validateId(idStr) {
-            case Ok(validId) => 
-                let filtered = List.filter(todo -> Todo.getId(todo) != validId, todos);
-                if (List.length(filtered) == List.length(todos))
-                    Err(TodoError.TodoNotFound(validId))
-                else
-                    Ok(filtered)
-            case Err(e) => Err(TodoError.ValidationError(e))
-        }
-
-    pub def findTodo(idStr: String, todos: List[Todo]): Result[TodoError, Todo] =
-        match TodoValidation.validateId(idStr) {
-            case Ok(validId) => 
-                match List.find(todo -> Todo.getId(todo) == validId, todos) {
-                    case Some(todo) => Ok(todo)
-                    case None => Err(TodoError.TodoNotFound(validId))
-                }
-            case Err(e) => Err(TodoError.ValidationError(e))
-        }
-    
-    pub def getActiveTodos(todos: List[Todo]): List[Todo] =
-        List.filter(todo -> not Todo.isCompleted(todo), todos)
-    
-    pub def getCompletedTodos(todos: List[Todo]): List[Todo] =
-        List.filter(Todo.isCompleted, todos)
-    
-    def generateUniqueId(todos: List[Todo]): Result[TodoError, TodoId] \ IO =
-        let existingIds = List.map(Todo.getId, todos) |> List.toSet;
-        let newId = generateId();
-        if (Set.memberOf(newId, existingIds))
-            generateUniqueId(todos) // Retry if collision
-        else
-            Ok(newId)
-    
-    def generateId(): TodoId \ IO =  // Add IO effect
-        let uuid = UUID.randomUUID();
-        TodoId.TodoId(uuid.toString())
-    
-    def updateTodoInList(targetId: TodoId, updateFn: Todo -> Todo, todos: List[Todo]): (Option[Todo], List[Todo]) =
-        def helper(remaining, updated, acc) = match remaining {
-            case Nil => (updated, List.reverse(acc))
-            case todo :: rest => 
-                if (Todo.getId(todo) == targetId) {
-                    let updatedTodo = updateFn(todo);
-                    helper(rest, Some(updatedTodo), updatedTodo :: acc)
-                } else {
-                    helper(rest, updated, todo :: acc)
-                }
-        };
-        helper(todos, None, Nil)
-}
-
-mod TodoValidation {
-    pub def validateText(text: String): Result[ValidationError, TodoText] =
-        let trimmed = String.trim(text);
-        if (String.isEmpty(trimmed))
-            Err(ValidationError.EmptyText)
-        else if (String.length(trimmed) > 500)
-            Err(ValidationError.TextTooLong(String.length(trimmed)))
-        else if (containsInvalidChars(trimmed))
-            Err(ValidationError.TextContainsInvalidChars)
-        else
-            Ok(TodoText.TodoText(trimmed))
-    
-    pub def validateId(id: String): Result[ValidationError, TodoId] =
-        let trimmed = String.trim(id);
-        if (String.isEmpty(trimmed))
-            Err(ValidationError.InvalidId(id))
-        else if (not isValidIdFormat(trimmed))
-            Err(ValidationError.InvalidId(id))
-        else
-            Ok(TodoId.TodoId(trimmed))
-    
-    def containsInvalidChars(text: String): Bool =
-        String.contains(substr="<", text) or 
-        String.contains(substr=">", text) or
-        String.contains(substr="&", text)
-    
-    def isValidIdFormat(id: String): Bool =
-        String.forAll(c -> Char.isLetterOrDigit(c) or c == '-', id)
-}
-
-enum TodoError with Eq {
-    case ValidationError(ValidationError),
-    case TodoNotFound(TodoId),
-    case DuplicateTodo(TodoId),
-    case StorageError(String)
-}
-
-enum ValidationError with Eq {
-    case EmptyText,
-    case TextTooLong(Int32),
-    case TextContainsInvalidChars,
-    case InvalidId(String)
-}
-
-instance ToString[ValidationError] {
-    pub def toString(e: ValidationError): String = match e {
-        case ValidationError.EmptyText => 
-            "Please enter some text for your todo item."
-        case ValidationError.TextTooLong(len) => 
-            "Todo text is too long (${len} characters). Please keep it under 500 characters."
-        case ValidationError.TextContainsInvalidChars => 
-            "Todo text contains invalid characters. Please avoid using <, >, and & symbols."
-        case ValidationError.InvalidId(id) => 
-            "Invalid todo ID: ${id}"
-    }
-}
-
-instance ToString[TodoError] {
-    pub def toString(e: TodoError): String = match e {
-        case TodoError.ValidationError(ve) => 
-            ToString.toString(ve)
-        case TodoError.TodoNotFound(TodoId.TodoId(id)) => 
-            "Todo item with ID '${id}' was not found."
-        case TodoError.DuplicateTodo(TodoId.TodoId(id)) => 
-            "A todo item with ID '${id}' already exists."
-        case TodoError.StorageError(msg) => 
-            "Storage error: ${msg}"
-    }
-}
-
+///
+/// JSON serialization for Todo
+///
 instance Json.ToJson[Todo] {
     pub def toJson(todo: Todo): Json.JsonElement = {
-        let Todo.Todo(id, text, status) = todo;
-        let TodoId.TodoId(idStr) = id;
-        let TodoText.TodoText(textStr) = text;
-        let statusStr = match status {
-            case TodoStatus.Active => "active"
-            case TodoStatus.Completed => "completed"
-        };
-        
-        Json.ToJson.toJson(Map#{
-            "id" => idStr,
-            "text" => textStr,
-            "status" => statusStr
+        use Json.JsonElement.{JsonObject, JsonNumber, JsonString, JsonBool};
+        let Todo.Todo(t) = todo;
+        JsonObject(Map#{
+            "id" => JsonNumber(Int32.toBigDecimal(t#id)),
+            "text" => JsonString(t#text),
+            "completed" => JsonBool(t#completed)
         })
     }
 }
+
+instance Json.FromJson[Todo] {
+    pub def fromJsonAt(p: Json.Path.Path, json: Json.JsonElement): Result[Json.JsonError, Todo] = {
+        forM (
+            obj <- Json.FromJson.fromJsonAt(p, json);
+            id <- Json.getAtKey(p, "id", obj);
+            text <- Json.getAtKey(p, "text", obj);
+            completed <- Json.getAtKey(p, "completed", obj)
+        ) yield Todo.Todo({ id = id, text = text, completed = completed })
+    }
+}
+
 ///
-/// Todo API using RestApi framework
+/// Opaque state wrapper for todos
 ///
-mod TodoApi {
-    use RestApi.{Api, Route}
-    use RestApi.Json.{jsonHandler, jsonBodyHandler}
-    use Json.JsonElement
-    use Json.ToJson
-    use Json.FromJson
-    use Json.Path.Path
-    
+pub enum TodoState[r: Region] {
+    case TodoState(Ref[List[Todo], r])
+}
+
+///
+/// State management operations
+///
+mod TodoState {
     ///
-    /// JSON deserialization for creating todos
+    /// Create a new state with initial todos
     ///
-    pub enum CreateTodoRequest {
-        case CreateTodoRequest(String)
+    pub def mkState(rc: Region[r], initial: List[Todo]): TodoState[r] \ r = {
+        let stateRef = Ref.fresh(rc, initial);
+        TodoState.TodoState(stateRef)
     }
     
-    instance FromJson[CreateTodoRequest] {
-        pub def fromJsonAt(p: Path, json: JsonElement): Result[Json.JsonError, CreateTodoRequest] = {
-            forM (
-                obj <- FromJson.fromJsonAt(p, json);
-                text <- Json.getAtKey(p, "text", obj)
-            ) yield CreateTodoRequest.CreateTodoRequest(text)
+    ///
+    /// Get all todos
+    ///
+    pub def getAll(state: TodoState[r]): List[Todo] \ r = {
+        let TodoState.TodoState(stateRef) = state;
+        Ref.get(stateRef)
+    }
+    
+    ///
+    /// Get a todo by ID
+    ///
+    pub def getById(id: Int32, state: TodoState[r]): Option[Todo] \ r = {
+        let todos = getAll(state);
+        List.find(match Todo.Todo(t) -> t#id == id, todos)
+    }
+    
+    ///
+    /// Add a new todo
+    ///
+    pub def add(text: String, state: TodoState[r]): Todo \ r = {
+        let TodoState.TodoState(stateRef) = state;
+        let todos = Ref.get(stateRef);
+        let newId = List.length(todos) + 1;
+        let newTodo = Todo.Todo({ id = newId, text = text, completed = false });
+        Ref.put(newTodo :: todos, stateRef);
+        newTodo
+    }
+    
+    ///
+    /// Delete a todo by ID
+    ///
+    pub def delete(id: Int32, state: TodoState[r]): Bool \ r = {
+        let TodoState.TodoState(stateRef) = state;
+        let todos = Ref.get(stateRef);
+        let filtered = List.filter(match Todo.Todo(t) -> t#id != id, todos);
+        let wasDeleted = List.length(filtered) != List.length(todos);
+        Ref.put(filtered, stateRef);
+        wasDeleted
+    }
+}
+
+///
+/// API Handlers
+///
+mod Handlers {
+    ///
+    /// Get all todos
+    ///
+    pub def getAllTodos(state: TodoState[r], _req: Request): Response \ r = {
+        let todos = TodoState.getAll(state);
+        Response.ok(Json.encode(todos))
+    }
+    
+    ///
+    /// Get a single todo by ID
+    ///
+    pub def getTodo(state: TodoState[r], req: Request): Response \ r = {
+        let Request.Request(r) = req;
+        match Map.get("id", r#pathParams) {
+            case None => Response.badRequest("Missing id parameter")
+            case Some(idStr) => 
+                match Int32.fromString(idStr) {
+                    case None => Response.badRequest("Invalid id format")
+                    case Some(id) =>
+                        match TodoState.getById(id, state) {
+                            case None => Response.notFound("Todo not found")
+                            case Some(todo) => Response.ok(Json.encode(todo))
+                        }
+                }
         }
     }
     
     ///
-    /// Handler: Get all todos
+    /// Create a new todo (expects JSON with "text" field)
     ///
-    pub def getAllTodos(_params: Map[String, String]): Result[RestApi.ApiError, List[Todo]] \ {TodoStorage, IO} = {
-        println("Fetching all todos");
-        let todos = TodoStorage.getAllTodos();
-        println("Fetched todos: ${todos}");
-        Ok(todos)
-    }
-    
-    ///
-    /// Handler: Get todo by ID
-    ///
-    pub def getTodoById(params: Map[String, String]): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
-        let id = Map.getWithDefault("id", "", params);
-        println("Fetching todo with id: ${id}");
-        match TodoService.findTodo(id, TodoStorage.getAllTodos()) {
-            case Ok(todo) => Ok(todo)
-            case Err(_) => Err(RestApi.ApiError.NotFound("Todo not found"))
-        }
-    }
-    
-    ///
-    /// Handler: Create a new todo
-    ///
-    pub def createTodo(req: CreateTodoRequest): Result[RestApi.ApiError, Todo] \ {TodoStorage, IO} = {
-        let CreateTodoRequest.CreateTodoRequest(text) = req;
-        let todos = TodoStorage.getAllTodos();
-        match TodoService.addTodo(text, todos) {
-            case Ok((newTodo, updatedTodos)) => {
-                TodoStorage.saveTodos(updatedTodos);
-                Ok(newTodo)
+    pub def createTodo(state: TodoState[r], req: Request): Response \ r = {
+        let Request.Request(r) = req;
+        match r#body {
+            case None => Response.badRequest("Request body required")
+            case Some(body) => {
+                let objOpt: Option[Map[String, String]] = Json.decode(body);
+                match objOpt {
+                    case None => Response.badRequest("Invalid JSON")
+                    case Some(obj) =>
+                        match Map.get("text", obj) {
+                            case None => Response.badRequest("Missing 'text' field")
+                            case Some(text) => 
+                                let newTodo = TodoState.add(text, state);
+                                Response.created(Json.encode(newTodo))
+                        }
+                }
             }
-            case Err(err) => 
-                Err(RestApi.ApiError.BadRequest(ToString.toString(err)))
         }
     }
     
     ///
-    /// Handler: Delete todo by ID
+    /// Delete a todo by ID
     ///
-    pub def deleteTodoById(params: Map[String, String]): Result[RestApi.ApiError, String] \ {TodoStorage, IO} = {
-        let id = Map.getWithDefault("id", "", params);
-        let todos = TodoStorage.getAllTodos();
-        println("Deleting todo with id: ${id}");
-        match TodoService.deleteTodo(id, todos) {
-            case Ok(updatedTodos) => {
-                TodoStorage.saveTodos(updatedTodos);
-                Ok("Deleted")
-            }
-            case Err(_) => 
-                Err(RestApi.ApiError.NotFound("Todo not found"))
+    pub def deleteTodo(state: TodoState[r], req: Request): Response \ r = {
+        let Request.Request(r) = req;
+        match Map.get("id", r#pathParams) {
+            case None => Response.badRequest("Missing id parameter")
+            case Some(idStr) => 
+                match Int32.fromString(idStr) {
+                    case None => Response.badRequest("Invalid id format")
+                    case Some(id) =>
+                        if (TodoState.delete(id, state))
+                            Response.noContent()
+                        else
+                            Response.notFound("Todo not found")
+                }
         }
     }
 }
@@ -318,34 +183,20 @@ mod TodoApi {
 /// Main entry point
 ///
 def main(): Unit \ IO = region rc {
+    // Initialize with some sample todos
     let initialTodos = List#{
-        Todo.create(TodoId.TodoId("demo-1"), TodoText.TodoText("Learn effect-oriented programming")),
-        Todo.create(TodoId.TodoId("demo-2"), TodoText.TodoText("Build a todo app")),  
-        Todo.create(TodoId.TodoId("demo-3"), TodoText.TodoText("Master HTMX integration"))
+        Todo.Todo({ id = 1, text = "Learn Flix", completed = false }),
+        Todo.Todo({ id = 2, text = "Build a REST API", completed = true })
     };
-    let stateRef = Ref.fresh(rc, initialTodos);
+    let state = TodoState.mkState(rc, initialTodos);
     
-    // Helper function to wrap route handlers with effect handlers
-    def withEffects(routeHandler) = (params, queryParams, bodyOpt) -> {
-        run {
-            routeHandler(params, queryParams, bodyOpt)
-        } with TodoStorageHandler.runWithState(stateRef)
-    };
-    
-    // Define routes with effects applied
+    // Define routes - casting region effect to IO for long-lived server state
     let routes = List#{
-        RestApi.get("/todos", 
-            withEffects(RestApi.Json.jsonHandler(TodoApi.getAllTodos))),
-        
-        RestApi.get("/todos/{id}", 
-            withEffects(RestApi.Json.jsonHandler(TodoApi.getTodoById))),
-        
-        RestApi.post("/todos", 
-            withEffects(RestApi.Json.jsonBodyHandler(TodoApi.createTodo))),
-        
-        RestApi.delete("/todos/{id}", 
-            withEffects(RestApi.Json.jsonHandler(TodoApi.deleteTodoById)))
+        Route.get("/todos", req -> unchecked_cast(Handlers.getAllTodos(state, req) as _ \ IO)),
+        Route.get("/todos/{id}", req -> unchecked_cast(Handlers.getTodo(state, req) as _ \ IO)),
+        Route.post("/todos", req -> unchecked_cast(Handlers.createTodo(state, req) as _ \ IO)),
+        Route.delete("/todos/{id}", req -> unchecked_cast(Handlers.deleteTodo(state, req) as _ \ IO))
     };
     
-    RestApi.Server.serve(8080, routes)
+    Server.serve(8080, routes)
 }
