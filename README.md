@@ -8,6 +8,8 @@ A simple, well-designed REST API framework for Flix that embraces effect-oriente
 - **Type-Safe**: Full type safety with Flix's powerful type system
 - **Effect-Oriented**: Clean separation of effects using Flix's effect system
 - **JSON Support**: Built-in JSON serialization/deserialization using flix-json
+- **OpenAPI 3.0**: Automatic OpenAPI specification generation from routes
+- **Interactive Documentation**: Built-in API docs with Scalar UI
 - **Minimal Dependencies**: Uses Java's built-in HTTP server for simplicity
 
 ## Framework Design
@@ -21,6 +23,7 @@ The framework is organized into three main modules:
 - **`Request`**: HTTP request with path parameters, query parameters, and body
 - **`Response`**: HTTP response with status and body
 - **`Route`**: Route definition mapping paths to handlers
+- **`RouteMetadata`**: Metadata for OpenAPI documentation (summary, description, tags, etc.)
 
 ### JSON Module
 
@@ -39,6 +42,16 @@ HTTP server implementation:
 - Path parameter extraction (e.g., `/todos/{id}`)
 - Query parameter parsing
 - Request body handling
+
+### OpenAPI Module
+
+Automatic API documentation generation:
+
+- `ApiInfo`: API metadata (title, version, description)
+- `generate`: Generate OpenAPI 3.0 specification from routes
+- `serveWithDocs`: Serve API with automatic documentation at `/api/docs`
+- `createDocsRoutes`: Create documentation routes to add to your API
+- Scalar UI integration for interactive API exploration
 
 ## Example Usage
 
@@ -81,6 +94,8 @@ The server will start on `http://localhost:8080` with the following endpoints:
 - `GET /todos/{id}` - Get a specific todo
 - `POST /todos` - Create a new todo (expects `{"text": "..."}`)
 - `DELETE /todos/{id}` - Delete a todo
+- `GET /api/docs` - Interactive API documentation (Scalar UI)
+- `GET /openapi.json` - OpenAPI 3.0 specification
 
 ## Testing with curl
 
@@ -108,16 +123,20 @@ curl -X DELETE http://localhost:8080/todos/1
 4. **Composability**: Handlers are just functions that can be easily composed
 5. **Idiomatic Flix**: Follows patterns seen in the Flix standard library and examples
 
-## Improvements Over Original
+## Key Features
 
-The rewritten framework features:
+The framework provides:
 
-- Cleaner separation of concerns (types, JSON, server)
-- Simpler handler types (`Request -> Response \ IO`)
-- Better organized modules
-- Removed unnecessary complexity (OpenAPI generation, complex error types)
-- Simplified the todo example while keeping it functional
+- Cleaner separation of concerns (types, JSON, server, OpenAPI)
+- Effect-polymorphic route handlers supporting any effect system
+- Automatic OpenAPI 3.0 specification generation
+- Interactive API documentation with Scalar
+- Type-safe route metadata for documentation
 - More idiomatic Flix code following best practices
+
+## Documentation
+
+For detailed information about OpenAPI features, see [OPENAPI.md](OPENAPI.md).
 
 ## Future Enhancements
 
@@ -130,6 +149,7 @@ Possible improvements for production use:
 - CORS support
 - Static file serving
 - Template rendering
+- Enhanced OpenAPI schema generation with request/response models
 
 ## License
 

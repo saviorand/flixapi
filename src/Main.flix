@@ -192,20 +192,61 @@ def main(): Unit \ IO = region rc {
     };
     let stateRef = Ref.fresh(rc, initialTodos);
     
-    // Define routes - handlers are interpreted with TodoStore effect handler
+    // Define routes with OpenAPI metadata
     let routes = List#{
         Route.get("/todos", req -> 
-            run { Handlers.getAllTodos(req) } with TodoStore.runWithState(stateRef)),
+            run { Handlers.getAllTodos(req) } with TodoStore.runWithState(stateRef))
+            |> Route.withMetadata(
+                RouteMetadata.empty()
+                |> RouteMetadata.withSummary("Get all todos")
+                |> RouteMetadata.withDescription("Retrieves a list of all todo items")
+                |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withResponse("List of todo items")
+            ),
         
         Route.get("/todos/{id}", req -> 
-            run { Handlers.getTodo(req) } with TodoStore.runWithState(stateRef)),
+            run { Handlers.getTodo(req) } with TodoStore.runWithState(stateRef))
+            |> Route.withMetadata(
+                RouteMetadata.empty()
+                |> RouteMetadata.withSummary("Get a todo by ID")
+                |> RouteMetadata.withDescription("Retrieves a single todo item by its ID")
+                |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withResponse("The requested todo item")
+            ),
         
         Route.post("/todos", req -> 
-            run { Handlers.createTodo(req) } with TodoStore.runWithState(stateRef)),
+            run { Handlers.createTodo(req) } with TodoStore.runWithState(stateRef))
+            |> Route.withMetadata(
+                RouteMetadata.empty()
+                |> RouteMetadata.withSummary("Create a new todo")
+                |> RouteMetadata.withDescription("Creates a new todo item with the provided text")
+                |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withRequestBody("Todo item with 'text' field")
+                |> RouteMetadata.withResponse("The created todo item")
+            ),
         
         Route.delete("/todos/{id}", req -> 
             run { Handlers.deleteTodo(req) } with TodoStore.runWithState(stateRef))
+            |> Route.withMetadata(
+                RouteMetadata.empty()
+                |> RouteMetadata.withSummary("Delete a todo")
+                |> RouteMetadata.withDescription("Deletes a todo item by its ID")
+                |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withResponse("No content on successful deletion")
+            )
     };
     
-    Server.serve(8080, routes)
+    // Create API info for OpenAPI spec
+    let apiInfo = OpenApi.ApiInfo.ApiInfo({
+        title = "Todo API",
+        version = "1.0.0",
+        description = Some("A simple REST API for managing todo items built with Flix")
+    });
+    
+    println("Starting Todo API server...");
+    println("API Documentation available at: http://localhost:8080/api/docs");
+    println("OpenAPI spec available at: http://localhost:8080/openapi.json");
+    
+    // Serve with automatic API documentation
+    OpenApi.serveWithDocs(8080, apiInfo, routes)
 }
