@@ -46,81 +46,83 @@ instance Json.FromJson[Todo] {
 }
 
 ///
+/// TodoStore effect for managing todo state
+///
+eff TodoStore {
+    /// Get all todos
+    def getAll(): List[Todo]
+    
+    /// Get a todo by ID
+    def getById(id: Int32): Option[Todo]
+    
+    /// Add a new todo
+    def add(text: String): Todo
+    
+    /// Delete a todo by ID
+    def delete(id: Int32): Bool
+}
+
+///
 /// Opaque state wrapper for todos
 ///
-pub enum TodoState[r: Region] {
+enum TodoState[r: Region] {
     case TodoState(Ref[List[Todo], r])
 }
 
 ///
-/// State management operations
+/// TodoStore effect handler using region-based state
 ///
-mod TodoState {
+mod TodoStore {
     ///
-    /// Create a new state with initial todos
+    /// Handles the TodoStore effect with region-based state, interpreting it as IO
     ///
-    pub def mkState(rc: Region[r], initial: List[Todo]): TodoState[r] \ r = {
-        let stateRef = Ref.fresh(rc, initial);
-        TodoState.TodoState(stateRef)
-    }
-    
-    ///
-    /// Get all todos
-    ///
-    pub def getAll(state: TodoState[r]): List[Todo] \ r = {
-        let TodoState.TodoState(stateRef) = state;
-        Ref.get(stateRef)
-    }
-    
-    ///
-    /// Get a todo by ID
-    ///
-    pub def getById(id: Int32, state: TodoState[r]): Option[Todo] \ r = {
-        let todos = getAll(state);
-        List.find(match Todo.Todo(t) -> t#id == id, todos)
-    }
-    
-    ///
-    /// Add a new todo
-    ///
-    pub def add(text: String, state: TodoState[r]): Todo \ r = {
-        let TodoState.TodoState(stateRef) = state;
-        let todos = Ref.get(stateRef);
-        let newId = List.length(todos) + 1;
-        let newTodo = Todo.Todo({ id = newId, text = text, completed = false });
-        Ref.put(newTodo :: todos, stateRef);
-        newTodo
-    }
-    
-    ///
-    /// Delete a todo by ID
-    ///
-    pub def delete(id: Int32, state: TodoState[r]): Bool \ r = {
-        let TodoState.TodoState(stateRef) = state;
-        let todos = Ref.get(stateRef);
-        let filtered = List.filter(match Todo.Todo(t) -> t#id != id, todos);
-        let wasDeleted = List.length(filtered) != List.length(todos);
-        Ref.put(filtered, stateRef);
-        wasDeleted
+    pub def runWithState(stateRef: Ref[List[Todo], r], f: Unit -> a \ ef): a \ ef - TodoStore + {IO, r} = {
+        run {
+            f()
+        } with handler TodoStore {
+            def getAll(resume) = 
+                Ref.get(stateRef) |> resume
+            
+            def getById(id, resume) = {
+                let todos = Ref.get(stateRef);
+                List.find(match Todo.Todo(t) -> t#id == id, todos) |> resume
+            }
+            
+            def add(text, resume) = {
+                let todos = Ref.get(stateRef);
+                let newId = List.length(todos) + 1;
+                let newTodo = Todo.Todo({ id = newId, text = text, completed = false });
+                Ref.put(newTodo :: todos, stateRef);
+                resume(newTodo)
+            }
+            
+            def delete(id, resume) = {
+                let todos = Ref.get(stateRef);
+                let filtered = List.filter(match Todo.Todo(t) -> t#id != id, todos);
+                let wasDeleted = List.length(filtered) != List.length(todos);
+                Ref.put(filtered, stateRef);
+                resume(wasDeleted)
+            }
+        }
     }
 }
 
 ///
-/// API Handlers
+/// API Handlers using TodoStore effect
 ///
 mod Handlers {
     ///
     /// Get all todos
     ///
-    pub def getAllTodos(state: TodoState[r], _req: Request): Response \ r = {
-        let todos = TodoState.getAll(state);
+    pub def getAllTodos(_req: Request): Response \ TodoStore = {
+        let todos = TodoStore.getAll();
         Response.ok(Json.encode(todos))
     }
     
     ///
     /// Get a single todo by ID
     ///
-    pub def getTodo(state: TodoState[r], req: Request): Response \ r = {
+    pub def getTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
         match Map.get("id", r#pathParams) {
             case None => Response.badRequest("Missing id parameter")
@@ -128,7 +130,7 @@ mod Handlers {
                 match Int32.fromString(idStr) {
                     case None => Response.badRequest("Invalid id format")
                     case Some(id) =>
-                        match TodoState.getById(id, state) {
+                        match TodoStore.getById(id) {
                             case None => Response.notFound("Todo not found")
                             case Some(todo) => Response.ok(Json.encode(todo))
                         }
@@ -139,7 +141,7 @@ mod Handlers {
     ///
     /// Create a new todo (expects JSON with "text" field)
     ///
-    pub def createTodo(state: TodoState[r], req: Request): Response \ r = {
+    pub def createTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
         match r#body {
             case None => Response.badRequest("Request body required")
@@ -151,7 +153,7 @@ mod Handlers {
                         match Map.get("text", obj) {
                             case None => Response.badRequest("Missing 'text' field")
                             case Some(text) => 
-                                let newTodo = TodoState.add(text, state);
+                                let newTodo = TodoStore.add(text);
                                 Response.created(Json.encode(newTodo))
                         }
                 }
@@ -162,7 +164,7 @@ mod Handlers {
     ///
     /// Delete a todo by ID
     ///
-    pub def deleteTodo(state: TodoState[r], req: Request): Response \ r = {
+    pub def deleteTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
         match Map.get("id", r#pathParams) {
             case None => Response.badRequest("Missing id parameter")
@@ -170,7 +172,7 @@ mod Handlers {
                 match Int32.fromString(idStr) {
                     case None => Response.badRequest("Invalid id format")
                     case Some(id) =>
-                        if (TodoState.delete(id, state))
+                        if (TodoStore.delete(id))
                             Response.noContent()
                         else
                             Response.notFound("Todo not found")
@@ -188,14 +190,21 @@ def main(): Unit \ IO = region rc {
         Todo.Todo({ id = 1, text = "Learn Flix", completed = false }),
         Todo.Todo({ id = 2, text = "Build a REST API", completed = true })
     };
-    let state = TodoState.mkState(rc, initialTodos);
+    let stateRef = Ref.fresh(rc, initialTodos);
     
-    // Define routes - casting region effect to IO for long-lived server state
+    // Define routes - handlers are interpreted with TodoStore effect handler
     let routes = List#{
-        Route.get("/todos", req -> unchecked_cast(Handlers.getAllTodos(state, req) as _ \ IO)),
-        Route.get("/todos/{id}", req -> unchecked_cast(Handlers.getTodo(state, req) as _ \ IO)),
-        Route.post("/todos", req -> unchecked_cast(Handlers.createTodo(state, req) as _ \ IO)),
-        Route.delete("/todos/{id}", req -> unchecked_cast(Handlers.deleteTodo(state, req) as _ \ IO))
+        Route.get("/todos", req -> 
+            run { Handlers.getAllTodos(req) } with TodoStore.runWithState(stateRef)),
+        
+        Route.get("/todos/{id}", req -> 
+            run { Handlers.getTodo(req) } with TodoStore.runWithState(stateRef)),
+        
+        Route.post("/todos", req -> 
+            run { Handlers.createTodo(req) } with TodoStore.runWithState(stateRef)),
+        
+        Route.delete("/todos/{id}", req -> 
+            run { Handlers.deleteTodo(req) } with TodoStore.runWithState(stateRef))
     };
     
     Server.serve(8080, routes)

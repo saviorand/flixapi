@@ -106,35 +106,35 @@ mod Response {
 }
 
 ///
-/// Route definition - handlers must have IO effect for interop with Java HTTP server
+/// Route definition - effect polymorphic to support any handler effects
 ///
-pub enum Route {
-    case Route(Method, String, Request -> Response \ IO)
+pub enum Route[ef: Eff] {
+    case Route(Method, String, Request -> Response \ ef)
 }
 
 mod Route {
     ///
     /// Create a GET route
     ///
-    pub def get(path: String, h: Request -> Response \ IO): Route =
+    pub def get(path: String, h: Request -> Response \ ef): Route[ef] =
         Route.Route(Method.Get, path, h)
     
     ///
     /// Create a POST route
     ///
-    pub def post(path: String, h: Request -> Response \ IO): Route =
+    pub def post(path: String, h: Request -> Response \ ef): Route[ef] =
         Route.Route(Method.Post, path, h)
     
     ///
     /// Create a PUT route
     ///
-    pub def put(path: String, h: Request -> Response \ IO): Route =
+    pub def put(path: String, h: Request -> Response \ ef): Route[ef] =
         Route.Route(Method.Put, path, h)
     
     ///
     /// Create a DELETE route
     ///
-    pub def delete(path: String, h: Request -> Response \ IO): Route =
+    pub def delete(path: String, h: Request -> Response \ ef): Route[ef] =
         Route.Route(Method.Delete, path, h)
 }
 
@@ -208,7 +208,7 @@ mod Server {
     ///
     /// Start the REST API server
     ///
-    pub def serve(port: Int32, routes: List[Route]): Unit \ IO = {
+    pub def serve(port: Int32, routes: List[Route[ef]]): Unit \ IO = {
         let addr = new InetSocketAddress(port);
         let server = JavaHttpServer.create(addr, 0);
         
@@ -231,7 +231,7 @@ mod Server {
     ///
     /// Group routes by their base path (without parameters)
     ///
-    def groupRoutesByBasePath(routes: List[Route]): Map[String, List[Route]] = {
+    def groupRoutesByBasePath(routes: List[Route[ef]]): Map[String, List[Route[ef]]] = {
         List.foldLeft((acc, route) -> {
             let Route.Route(_, path, _) = route;
             let basePath = extractBasePath(path);
@@ -254,9 +254,9 @@ mod Server {
     ///
     /// Register all routes at a given base path with a multiplexing handler
     ///
-    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, routes: List[Route]): Unit \ IO = {
+    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, routes: List[Route[ef]]): Unit \ IO = {
         let javaHandler = new HttpHandler {
-            def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ IO = {
+            def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ {IO, ef} = {
                 let method = exchange.getRequestMethod();
                 let path = exchange.getRequestURI().getPath();
                 
