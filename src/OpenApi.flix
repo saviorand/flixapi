@@ -51,17 +51,17 @@ mod OpenApi {
             let Route.Route(method, path, _, metadata) = route;
             let pathKey = convertPathToOpenApi(path);
             let existing = Map.getWithDefault(pathKey, Nil, acc);
-            Map.insert(pathKey, (method, metadata) :: existing, acc)
+            Map.insert(pathKey, (method, path, metadata) :: existing, acc)
         }, Map.empty(), routes);
         
         // Then convert each path's routes to operations
-        Map.map((methodMetadataList) -> {
-            let operations = List.foldLeft((opMap, methodMetadata) -> {
-                let (method, metadata) = methodMetadata;
-                let operation = generateOperation(method, metadata);
+        Map.map((methodPathMetadataList) -> {
+            let operations = List.foldLeft((opMap, methodPathMetadata) -> {
+                let (method, path, metadata) = methodPathMetadata;
+                let operation = generateOperation(method, path, metadata);
                 let methodKey = methodToString(method);
                 Map.insert(methodKey, operation, opMap)
-            }, Map.empty(), methodMetadataList);
+            }, Map.empty(), methodPathMetadataList);
             JsonObject(operations)
         }, groupedByPath)
     }
@@ -84,9 +84,48 @@ mod OpenApi {
     }
     
     ///
+    /// Extract path parameters from a path string
+    /// e.g., "/todos/{id}/items/{itemId}" => ["id", "itemId"]
+    ///
+    def extractPathParams(path: String): List[String] = 
+        extractPathParamsHelper(String.toList(path), Nil, false, Nil)
+    
+    ///
+    /// Helper to extract path parameters by parsing character by character
+    ///
+    def extractPathParamsHelper(chars: List[Char], acc: List[String], inParam: Bool, current: List[Char]): List[String] = match chars {
+        case Nil => 
+            List.reverse(acc)
+        case '{' :: rest => 
+            extractPathParamsHelper(rest, acc, true, Nil)
+        case '}' :: rest => 
+            if (inParam and not List.isEmpty(current)) {
+                let paramName = charsToString(List.reverse(current));
+                extractPathParamsHelper(rest, paramName :: acc, false, Nil)
+            } else {
+                extractPathParamsHelper(rest, acc, false, Nil)
+            }
+        case c :: rest => 
+            if (inParam) {
+                extractPathParamsHelper(rest, acc, true, c :: current)
+            } else {
+                extractPathParamsHelper(rest, acc, false, current)
+            }
+    }
+    
+    ///
+    /// Convert a list of characters to a string
+    ///
+    def charsToString(chars: List[Char]): String = region r {
+        let sb = StringBuilder.empty(r);
+        List.forEach(c -> StringBuilder.append(c, sb), chars);
+        StringBuilder.toString(sb)
+    }
+    
+    ///
     /// Generate operation object for a route
     ///
-    def generateOperation(method: Method, metadata: RouteMetadata): JsonElement = {
+    def generateOperation(method: Method, path: String, metadata: RouteMetadata): JsonElement = {
         let RouteMetadata.RouteMetadata(m) = metadata;
         
         let baseOp = Map#{
@@ -163,7 +202,23 @@ mod OpenApi {
             case _ => withTags
         };
         
-        JsonObject(withRequestBody)
+        // Extract and add path parameters
+        let pathParams = extractPathParams(path);
+        let withParams = if (List.isEmpty(pathParams)) {
+            withRequestBody
+        } else {
+            let paramArray = List.map(paramName -> JsonObject(Map#{
+                "name" => JsonString(paramName),
+                "in" => JsonString("path"),
+                "required" => JsonBool(true),
+                "schema" => JsonObject(Map#{
+                    "type" => JsonString("string")
+                })
+            }), pathParams);
+            Map.insert("parameters", JsonArray(paramArray), withRequestBody)
+        };
+        
+        JsonObject(withParams)
     }
     
     ///
@@ -225,10 +280,10 @@ mod OpenApi {
     ///
     /// Serve API with automatic documentation routes
     ///
-    pub def serveWithDocs(port: Int32, info: ApiInfo, routes: List[Route[ef]]): Unit \ IO = {
+    pub def serveWithDocs(port: Int32, corsConfig: CorsConfig, info: ApiInfo, routes: List[Route[ef]]): Unit \ IO = {
         let docsRoutes = createDocsRoutes(info, routes);
         let allRoutes = List.append(routes, docsRoutes);
-        Server.serve(port, allRoutes)
+        Server.serve(port, corsConfig, allRoutes)
     }
 }
 

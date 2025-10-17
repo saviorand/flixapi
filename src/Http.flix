@@ -53,6 +53,34 @@ pub enum Request {
 }
 
 ///
+/// CORS configuration
+///
+pub enum CorsConfig {
+    /// Allow all origins (*)
+    case AllowAll
+    /// Allow specific origins only
+    case AllowOrigins(List[String])
+    /// Disable CORS headers
+    case Disabled
+}
+
+mod CorsConfig {
+    ///
+    /// Get the Access-Control-Allow-Origin header value
+    ///
+    pub def getAllowOriginHeader(config: CorsConfig, requestOrigin: Option[String]): Option[String] = 
+        match config {
+            case CorsConfig.AllowAll => Some("*")
+            case CorsConfig.AllowOrigins(origins) =>
+                match requestOrigin {
+                    case Some(origin) if List.memberOf(origin, origins) => Some(origin)
+                    case _ => None
+                }
+            case CorsConfig.Disabled => None
+        }
+}
+
+///
 /// HTTP response
 ///
 pub enum Response {

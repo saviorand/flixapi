@@ -243,10 +243,21 @@ def main(): Unit \ IO = region rc {
         description = Some("A simple REST API for managing todo items built with Flix")
     });
     
+    // Configure CORS based on your environment:
+    // 
+    // Development (allow all origins):
+    let corsConfig = CorsConfig.AllowAll;
+    // 
+    // Production (allow specific origins only):
+    // let corsConfig = CorsConfig.AllowOrigins(List#{"https://yourdomain.com", "https://app.yourdomain.com"});
+    // 
+    // Disable CORS (no headers):
+    // let corsConfig = CorsConfig.Disabled;
+    
     println("Starting Todo API server...");
     println("API Documentation available at: http://localhost:8080/api/docs");
     println("OpenAPI spec available at: http://localhost:8080/openapi.json");
     
     // Serve with automatic API documentation
-    OpenApi.serveWithDocs(8080, apiInfo, routes)
+    OpenApi.serveWithDocs(8080, corsConfig, apiInfo, routes)
 }

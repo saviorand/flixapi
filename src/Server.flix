@@ -11,14 +11,14 @@ mod Server {
     ///
     /// Start the REST API server
     ///
-    pub def serve(port: Int32, routes: List[Route[ef]]): Unit \ IO = {
+    pub def serve(port: Int32, corsConfig: CorsConfig, routes: List[Route[ef]]): Unit \ IO = {
         let addr = new InetSocketAddress(port);
         let server = JavaHttpServer.create(addr, 0);
         
         // Group routes by base path for efficient routing
         let routesByBasePath = groupRoutesByBasePath(routes);
         Map.forEach((basePath, routesForPath) -> 
-            registerRoutesAtPath(server, basePath, routesForPath), routesByBasePath);
+            registerRoutesAtPath(server, basePath, corsConfig, routesForPath), routesByBasePath);
         
         server.start();
         println("Server running on http://localhost:${port}");
@@ -57,42 +57,48 @@ mod Server {
     ///
     /// Register all routes at a given base path with a multiplexing handler
     ///
-    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, routes: List[Route[ef]]): Unit \ IO = {
+    def registerRoutesAtPath(server: JavaHttpServer, basePath: String, corsConfig: CorsConfig, routes: List[Route[ef]]): Unit \ IO = {
         let javaHandler = new HttpHandler {
             def $handle(_this: HttpHandler, exchange: HttpExchange): Unit \ {IO, ef} = {
                 let method = exchange.getRequestMethod();
                 let path = exchange.getRequestURI().getPath();
+                let requestOrigin = getRequestOrigin(exchange);
                 
-                // Find matching route
-                let matchingRoute = List.find(route -> {
-                    let Route.Route(m, p, _, _) = route;
-                    methodMatches(method, m) and pathMatches(p, path)
-                }, routes);
-                
-                match matchingRoute {
-                    case Some(Route.Route(_, pathPattern, h, _)) => {
-                        let pathParams = extractPathParams(pathPattern, path);
-                        let queryParams = extractQueryParams(exchange);
-                        let body = readRequestBody(exchange);
-                        
-                        let request = Request.Request({
-                            pathParams = pathParams,
-                            queryParams = queryParams,
-                            body = body
-                        });
-                        
-                        let response = h(request);
-                        let Response.Response(r) = response;
-                        
-                        // Check if response is HTML
-                        if (String.startsWith(prefix="<!DOCTYPE html>", r#body) or String.startsWith(prefix="<html>", r#body))
-                            writeHtmlResponse(exchange, r#body)
-                        else
-                            writeResponse(exchange, response)
+                // Handle OPTIONS preflight requests for CORS
+                if (method == "OPTIONS") {
+                    writeCorsPreflightResponse(exchange, corsConfig, requestOrigin)
+                } else {
+                    // Find matching route
+                    let matchingRoute = List.find(route -> {
+                        let Route.Route(m, p, _, _) = route;
+                        methodMatches(method, m) and pathMatches(p, path)
+                    }, routes);
+                    
+                    match matchingRoute {
+                        case Some(Route.Route(_, pathPattern, h, _)) => {
+                            let pathParams = extractPathParams(pathPattern, path);
+                            let queryParams = extractQueryParams(exchange);
+                            let body = readRequestBody(exchange);
+                            
+                            let request = Request.Request({
+                                pathParams = pathParams,
+                                queryParams = queryParams,
+                                body = body
+                            });
+                            
+                            let response = h(request);
+                            let Response.Response(r) = response;
+                            
+                            // Check if response is HTML
+                            if (String.startsWith(prefix="<!DOCTYPE html>", r#body) or String.startsWith(prefix="<html>", r#body))
+                                writeHtmlResponse(exchange, corsConfig, requestOrigin, r#body)
+                            else
+                                writeResponse(exchange, corsConfig, requestOrigin, response)
+                        }
+                        case None =>
+                            let notFoundResp = Response.notFound("Route not found");
+                            writeResponse(exchange, corsConfig, requestOrigin, notFoundResp)
                     }
-                    case None =>
-                        let notFoundResp = Response.notFound("Route not found");
-                        writeResponse(exchange, notFoundResp)
                 }
             }
         };
@@ -180,14 +186,28 @@ mod Server {
     }
     
     ///
+    /// Get the Origin header from the request
+    ///
+    def getRequestOrigin(exchange: HttpExchange): Option[String] \ IO = {
+        let headers = exchange.getRequestHeaders();
+        let originHeader = headers.getFirst("Origin");
+        if (Object.isNull(originHeader)) None else Some(originHeader)
+    }
+    
+    ///
     /// Write response
     ///
-    def writeResponse(exchange: HttpExchange, response: Response): Unit \ IO = {
+    def writeResponse(exchange: HttpExchange, corsConfig: CorsConfig, requestOrigin: Option[String], response: Response): Unit \ IO = {
         let Response.Response(r) = response;
         let statusCode = Status.toCode(r#status);
         let body = r#body;
         
-        exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+        let headers = exchange.getResponseHeaders();
+        headers.set("Content-Type", "application/json; charset=utf-8");
+        
+        // Set CORS headers if configured
+        setCorsHeaders(exchange, corsConfig, requestOrigin);
+        
         let bytes = body.getBytes();
         exchange.sendResponseHeaders(statusCode, Int32.toInt64(Array.length(bytes)));
         let outputStream = exchange.getResponseBody();
@@ -199,14 +219,53 @@ mod Server {
     ///
     /// Write HTML response
     ///
-    def writeHtmlResponse(exchange: HttpExchange, html: String): Unit \ IO = {
-        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+    def writeHtmlResponse(exchange: HttpExchange, corsConfig: CorsConfig, requestOrigin: Option[String], html: String): Unit \ IO = {
+        let headers = exchange.getResponseHeaders();
+        headers.set("Content-Type", "text/html; charset=utf-8");
+        
+        // Set CORS headers if configured
+        setCorsHeaders(exchange, corsConfig, requestOrigin);
+        
         let bytes = html.getBytes();
         exchange.sendResponseHeaders(200, Int32.toInt64(Array.length(bytes)));
         let outputStream = exchange.getResponseBody();
         outputStream.write(bytes);
         outputStream.close();
         exchange.close()
+    }
+    
+    ///
+    /// Write CORS preflight response for OPTIONS requests
+    ///
+    def writeCorsPreflightResponse(exchange: HttpExchange, corsConfig: CorsConfig, requestOrigin: Option[String]): Unit \ IO = {
+        // Set CORS headers if configured
+        setCorsHeaders(exchange, corsConfig, requestOrigin);
+        
+        let headers = exchange.getResponseHeaders();
+        headers.set("Access-Control-Max-Age", "86400"); // 24 hours
+        
+        exchange.sendResponseHeaders(204, -1i64); // No content
+        exchange.close()
+    }
+    
+    ///
+    /// Helper to set CORS headers based on configuration
+    ///
+    def setCorsHeaders(exchange: HttpExchange, corsConfig: CorsConfig, requestOrigin: Option[String]): Unit \ IO = {
+        let headers = exchange.getResponseHeaders();
+        match CorsConfig.getAllowOriginHeader(corsConfig, requestOrigin) {
+            case Some(origin) => {
+                headers.set("Access-Control-Allow-Origin", origin);
+                headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+                headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+                // When using specific origins (not *), we need to set Vary header
+                match corsConfig {
+                    case CorsConfig.AllowOrigins(_) => headers.set("Vary", "Origin")
+                    case _ => ()
+                }
+            }
+            case None => ()
+        }
     }
 }
 
