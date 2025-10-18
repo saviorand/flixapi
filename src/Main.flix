@@ -58,6 +58,9 @@ eff TodoStore {
     /// Add a new todo
     def add(text: String): Todo
     
+    /// Update an existing todo
+    def update(id: Int32, text: String, completed: Bool): Option[Todo]
+    
     /// Delete a todo by ID
     def delete(id: Int32): Bool
 }
@@ -94,6 +97,24 @@ mod TodoStore {
                 let newTodo = Todo.Todo({ id = newId, text = text, completed = false });
                 Ref.put(newTodo :: todos, stateRef);
                 resume(newTodo)
+            }
+            
+            def update(id, text, completed, resume) = {
+                let todos = Ref.get(stateRef);
+                let updatedTodos = List.map(match Todo.Todo(t) -> 
+                    if (t#id == id)
+                        Todo.Todo({ id = id, text = text, completed = completed })
+                    else
+                        Todo.Todo(t)
+                , todos);
+                let found = List.find(match Todo.Todo(t) -> t#id == id, todos);
+                match found {
+                    case Some(_) => {
+                        Ref.put(updatedTodos, stateRef);
+                        resume(Some(Todo.Todo({ id = id, text = text, completed = completed })))
+                    }
+                    case None => resume(None)
+                }
             }
             
             def delete(id, resume) = {
@@ -158,6 +179,36 @@ mod Handlers {
                         }
                 }
             }
+        }
+    }
+    
+    ///
+    /// Update a todo by ID
+    ///
+    pub def updateTodo(req: Request): Response \ TodoStore = {
+        let Request.Request(r) = req;
+        match Map.get("id", r#pathParams) {
+            case None => Response.badRequest("Missing id parameter")
+            case Some(idStr) => 
+                match Int32.fromString(idStr) {
+                    case None => Response.badRequest("Invalid id format")
+                    case Some(id) =>
+                        match r#body {
+                            case None => Response.badRequest("Request body required")
+                            case Some(body) => {
+                                let todoOpt: Option[Todo] = Json.decode(body);
+                                match todoOpt {
+                                    case None => Response.badRequest("Invalid JSON")
+                                    case Some(Todo.Todo(t)) => {
+                                        match TodoStore.update(id, t#text, t#completed) {
+                                            case None => Response.notFound("Todo not found")
+                                            case Some(updated) => Response.ok(Json.encode(updated))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                }
         }
     }
     
@@ -278,6 +329,19 @@ def main(): Unit \ IO = region rc {
                 |> RouteMetadata.withRequestBody("Todo item with 'text' field")
                 |> RouteMetadata.withRequestSchema(Schemas.createTodoRef())
                 |> RouteMetadata.withResponse("The created todo item")
+                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
+            ),
+        
+        Route.put("/todos/{id}", req -> 
+            run { Handlers.updateTodo(req) } with TodoStore.runWithState(stateRef))
+            |> Route.withMetadata(
+                RouteMetadata.empty()
+                |> RouteMetadata.withSummary("Update a todo")
+                |> RouteMetadata.withDescription("Updates an existing todo item with new text and/or completion status")
+                |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withRequestBody("Updated todo item")
+                |> RouteMetadata.withRequestSchema(Schemas.todoRef())
+                |> RouteMetadata.withResponse("The updated todo item")
                 |> RouteMetadata.withResponseSchema(Schemas.todoRef())
             ),
         
