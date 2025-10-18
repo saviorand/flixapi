@@ -182,6 +182,58 @@ mod Handlers {
 }
 
 ///
+/// Define schemas for OpenAPI documentation
+///
+mod Schemas {
+    use OpenApi.Schema
+    use OpenApi.Schema.{ObjectSchema, ArraySchema, StringSchema, IntegerSchema, BooleanSchema, RefSchema}
+    use OpenApi.NamedSchema
+    use OpenApi.NamedSchema.NamedSchema
+    
+    ///
+    /// Schema for a single Todo item (inline definition)
+    ///
+    def todoSchemaDefinition(): Schema = 
+        ObjectSchema(Map#{
+            "id" => IntegerSchema,
+            "text" => StringSchema,
+            "completed" => BooleanSchema
+        })
+    
+    ///
+    /// Schema for creating a new Todo (no id field, inline definition)
+    ///
+    def createTodoSchemaDefinition(): Schema = 
+        ObjectSchema(Map#{
+            "text" => StringSchema
+        })
+    
+    ///
+    /// Reference to the Todo schema
+    ///
+    pub def todoRef(): Schema = RefSchema("Todo")
+    
+    ///
+    /// Reference to an array of Todos
+    ///
+    pub def todoListRef(): Schema = ArraySchema(RefSchema("Todo"))
+    
+    ///
+    /// Reference to the CreateTodo schema
+    ///
+    pub def createTodoRef(): Schema = RefSchema("CreateTodo")
+    
+    ///
+    /// All named schemas for the components section
+    ///
+    pub def allSchemas(): List[NamedSchema] = 
+        List#{
+            NamedSchema({ name = "Todo", schema = todoSchemaDefinition() }),
+            NamedSchema({ name = "CreateTodo", schema = createTodoSchemaDefinition() })
+        }
+}
+
+///
 /// Main entry point
 ///
 def main(): Unit \ IO = region rc {
@@ -202,6 +254,7 @@ def main(): Unit \ IO = region rc {
                 |> RouteMetadata.withDescription("Retrieves a list of all todo items")
                 |> RouteMetadata.withTags("todos" :: Nil)
                 |> RouteMetadata.withResponse("List of todo items")
+                |> RouteMetadata.withResponseSchema(Schemas.todoListRef())
             ),
         
         Route.get("/todos/{id}", req -> 
@@ -212,6 +265,7 @@ def main(): Unit \ IO = region rc {
                 |> RouteMetadata.withDescription("Retrieves a single todo item by its ID")
                 |> RouteMetadata.withTags("todos" :: Nil)
                 |> RouteMetadata.withResponse("The requested todo item")
+                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
             ),
         
         Route.post("/todos", req -> 
@@ -222,7 +276,9 @@ def main(): Unit \ IO = region rc {
                 |> RouteMetadata.withDescription("Creates a new todo item with the provided text")
                 |> RouteMetadata.withTags("todos" :: Nil)
                 |> RouteMetadata.withRequestBody("Todo item with 'text' field")
+                |> RouteMetadata.withRequestSchema(Schemas.createTodoRef())
                 |> RouteMetadata.withResponse("The created todo item")
+                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
             ),
         
         Route.delete("/todos/{id}", req -> 
@@ -258,6 +314,6 @@ def main(): Unit \ IO = region rc {
     println("API Documentation available at: http://localhost:8080/api/docs");
     println("OpenAPI spec available at: http://localhost:8080/openapi.json");
     
-    // Serve with automatic API documentation
-    OpenApi.serveWithDocs(8080, corsConfig, apiInfo, routes)
+    // Serve with automatic API documentation and named schemas
+    OpenApi.serveWithDocsAndSchemas(8080, corsConfig, apiInfo, routes, Schemas.allSchemas())
 }

@@ -11,7 +11,9 @@ pub enum RouteMetadata {
         description = Option[String],
         tags = List[String],
         requestBodyDescription = Option[String],
-        responseDescription = Option[String]
+        responseDescription = Option[String],
+        requestSchema = Option[OpenApi.Schema],
+        responseSchema = Option[OpenApi.Schema]
     })
 }
 
@@ -25,7 +27,9 @@ mod RouteMetadata {
             description = None,
             tags = Nil,
             requestBodyDescription = None,
-            responseDescription = None
+            responseDescription = None,
+            requestSchema = None,
+            responseSchema = None
         })
     
     ///
@@ -62,6 +66,20 @@ mod RouteMetadata {
     pub def withResponse(desc: String, metadata: RouteMetadata): RouteMetadata =
         let RouteMetadata.RouteMetadata(m) = metadata;
         RouteMetadata.RouteMetadata({responseDescription = Some(desc) | m})
+    
+    ///
+    /// Add request schema
+    ///
+    pub def withRequestSchema(schema: OpenApi.Schema, metadata: RouteMetadata): RouteMetadata =
+        let RouteMetadata.RouteMetadata(m) = metadata;
+        RouteMetadata.RouteMetadata({requestSchema = Some(schema) | m})
+    
+    ///
+    /// Add response schema
+    ///
+    pub def withResponseSchema(schema: OpenApi.Schema, metadata: RouteMetadata): RouteMetadata =
+        let RouteMetadata.RouteMetadata(m) = metadata;
+        RouteMetadata.RouteMetadata({responseSchema = Some(schema) | m})
 }
 
 ///
