@@ -209,10 +209,18 @@ mod Server {
         setCorsHeaders(exchange, corsConfig, requestOrigin);
         
         let bytes = body.getBytes();
-        exchange.sendResponseHeaders(statusCode, Int32.toInt64(Array.length(bytes)));
-        let outputStream = exchange.getResponseBody();
-        outputStream.write(bytes);
-        outputStream.close();
+        // For 204 No Content, use -1 (no content length) per HTTP spec
+        let contentLength = if (statusCode == 204) -1i64 else Int32.toInt64(Array.length(bytes));
+        exchange.sendResponseHeaders(statusCode, contentLength);
+        
+        // Only write body if there is content
+        if (statusCode != 204) {
+            let outputStream = exchange.getResponseBody();
+            outputStream.write(bytes);
+            outputStream.close()
+        } else {
+            ()
+        };
         exchange.close()
     }
     
