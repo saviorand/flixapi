@@ -352,6 +352,7 @@ def main(): Unit \ IO = region rc {
                 |> RouteMetadata.withSummary("Delete a todo")
                 |> RouteMetadata.withDescription("Deletes a todo item by its ID")
                 |> RouteMetadata.withTags("todos" :: Nil)
+                |> RouteMetadata.withResponseStatus(204)
                 |> RouteMetadata.withResponse("No content on successful deletion")
             )
     };

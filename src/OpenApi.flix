@@ -199,18 +199,30 @@ mod OpenApi {
     def generateOperation(method: Method, path: String, metadata: RouteMetadata): JsonElement = {
         let RouteMetadata.RouteMetadata(m) = metadata;
         
-        let responseSchema = m#responseSchema 
-            |> Option.map(Schema.toJson) 
-            |> Option.getWithDefault(JsonObject(Map#{"type" => JsonString("object")}));
+        let statusCode = m#responseStatus |> Option.getWithDefault(200);
+        let statusCodeStr = "${statusCode}";
+        
+        // For 204 No Content, don't include a response body
+        let responseObj = if (statusCode == 204) {
+            Map#{
+                "description" => JsonString(Option.getWithDefault("No content", m#responseDescription))
+            }
+        } else {
+            let responseSchema = m#responseSchema 
+                |> Option.map(Schema.toJson) 
+                |> Option.getWithDefault(JsonObject(Map#{"type" => JsonString("object")}));
+            
+            Map#{
+                "description" => JsonString(Option.getWithDefault("Successful response", m#responseDescription)),
+                "content" => JsonObject(Map#{
+                    "application/json" => JsonObject(Map#{"schema" => responseSchema})
+                })
+            }
+        };
         
         let baseOp = Map#{
             "responses" => JsonObject(Map#{
-                "200" => JsonObject(Map#{
-                    "description" => JsonString(Option.getWithDefault("Successful response", m#responseDescription)),
-                    "content" => JsonObject(Map#{
-                        "application/json" => JsonObject(Map#{"schema" => responseSchema})
-                    })
-                })
+                statusCodeStr => JsonObject(responseObj)
             })
         };
         

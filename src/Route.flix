@@ -13,7 +13,8 @@ pub enum RouteMetadata {
         requestBodyDescription = Option[String],
         responseDescription = Option[String],
         requestSchema = Option[OpenApi.Schema],
-        responseSchema = Option[OpenApi.Schema]
+        responseSchema = Option[OpenApi.Schema],
+        responseStatus = Option[Int32]
     })
 }
 
@@ -29,7 +30,8 @@ mod RouteMetadata {
             requestBodyDescription = None,
             responseDescription = None,
             requestSchema = None,
-            responseSchema = None
+            responseSchema = None,
+            responseStatus = None
         })
     
     ///
@@ -80,6 +82,13 @@ mod RouteMetadata {
     pub def withResponseSchema(schema: OpenApi.Schema, metadata: RouteMetadata): RouteMetadata =
         let RouteMetadata.RouteMetadata(m) = metadata;
         RouteMetadata.RouteMetadata({responseSchema = Some(schema) | m})
+    
+    ///
+    /// Add response status code (default is 200)
+    ///
+    pub def withResponseStatus(status: Int32, metadata: RouteMetadata): RouteMetadata =
+        let RouteMetadata.RouteMetadata(m) = metadata;
+        RouteMetadata.RouteMetadata({responseStatus = Some(status) | m})
 }
 
 ///
