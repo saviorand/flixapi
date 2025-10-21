@@ -129,5 +129,101 @@ mod Route {
     pub def withMetadata(metadata: RouteMetadata, route: Route[ef]): Route[ef] =
         let Route.Route(method, path, h, _) = route;
         Route.Route(method, path, h, metadata)
+    
+    ///
+    /// Create a GET route with metadata record
+    ///
+    pub def getMeta(path: String, h: Request -> Response \ ef, meta: {
+        summary = String,
+        description = String,
+        tags = List[String],
+        requestBody = Option[String],
+        requestSchema = Option[OpenApi.Schema],
+        response = Option[String],
+        responseSchema = Option[OpenApi.Schema],
+        responseStatus = Option[Int32]
+    }): Route[ef] = 
+        Route.Route(Method.Get, path, h, RouteMetadata.RouteMetadata({
+            summary = Some(meta#summary),
+            description = Some(meta#description),
+            tags = meta#tags,
+            requestBodyDescription = meta#requestBody,
+            requestSchema = meta#requestSchema,
+            responseDescription = meta#response,
+            responseSchema = meta#responseSchema,
+            responseStatus = meta#responseStatus
+        }))
+    
+    ///
+    /// Create a POST route with metadata record
+    ///
+    pub def postMeta(path: String, h: Request -> Response \ ef, meta: {
+        summary = String,
+        description = String,
+        tags = List[String],
+        requestBody = Option[String],
+        requestSchema = Option[OpenApi.Schema],
+        response = Option[String],
+        responseSchema = Option[OpenApi.Schema],
+        responseStatus = Option[Int32]
+    }): Route[ef] = 
+        Route.Route(Method.Post, path, h, RouteMetadata.RouteMetadata({
+            summary = Some(meta#summary),
+            description = Some(meta#description),
+            tags = meta#tags,
+            requestBodyDescription = meta#requestBody,
+            requestSchema = meta#requestSchema,
+            responseDescription = meta#response,
+            responseSchema = meta#responseSchema,
+            responseStatus = meta#responseStatus
+        }))
+    
+    ///
+    /// Create a PUT route with metadata record
+    ///
+    pub def putMeta(path: String, h: Request -> Response \ ef, meta: {
+        summary = String,
+        description = String,
+        tags = List[String],
+        requestBody = Option[String],
+        requestSchema = Option[OpenApi.Schema],
+        response = Option[String],
+        responseSchema = Option[OpenApi.Schema],
+        responseStatus = Option[Int32]
+    }): Route[ef] = 
+        Route.Route(Method.Put, path, h, RouteMetadata.RouteMetadata({
+            summary = Some(meta#summary),
+            description = Some(meta#description),
+            tags = meta#tags,
+            requestBodyDescription = meta#requestBody,
+            requestSchema = meta#requestSchema,
+            responseDescription = meta#response,
+            responseSchema = meta#responseSchema,
+            responseStatus = meta#responseStatus
+        }))
+    
+    ///
+    /// Create a DELETE route with metadata record
+    ///
+    pub def deleteMeta(path: String, h: Request -> Response \ ef, meta: {
+        summary = String,
+        description = String,
+        tags = List[String],
+        requestBody = Option[String],
+        requestSchema = Option[OpenApi.Schema],
+        response = Option[String],
+        responseSchema = Option[OpenApi.Schema],
+        responseStatus = Option[Int32]
+    }): Route[ef] = 
+        Route.Route(Method.Delete, path, h, RouteMetadata.RouteMetadata({
+            summary = Some(meta#summary),
+            description = Some(meta#description),
+            tags = meta#tags,
+            requestBodyDescription = meta#requestBody,
+            requestSchema = meta#requestSchema,
+            responseDescription = meta#response,
+            responseSchema = meta#responseSchema,
+            responseStatus = meta#responseStatus
+        }))
 }
 

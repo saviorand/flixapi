@@ -295,66 +295,77 @@ def main(): Unit \ IO = region rc {
     };
     let stateRef = Ref.fresh(rc, initialTodos);
     
-    // Define routes with OpenAPI metadata
+    // Define routes with clean record-based metadata
     let routes = List#{
-        Route.get("/todos", req -> 
-            run { Handlers.getAllTodos(req) } with TodoStore.runWithState(stateRef))
-            |> Route.withMetadata(
-                RouteMetadata.empty()
-                |> RouteMetadata.withSummary("Get all todos")
-                |> RouteMetadata.withDescription("Retrieves a list of all todo items")
-                |> RouteMetadata.withTags("todos" :: Nil)
-                |> RouteMetadata.withResponse("List of todo items")
-                |> RouteMetadata.withResponseSchema(Schemas.todoListRef())
-            ),
+        Route.getMeta("/todos", 
+            req -> run { Handlers.getAllTodos(req) } with TodoStore.runWithState(stateRef),
+            {
+                summary = "Get all todos",
+                description = "Retrieves a list of all todo items",
+                tags = "todos" :: Nil,
+                requestBody = None,
+                requestSchema = None,
+                response = Some("List of todo items"),
+                responseSchema = Some(Schemas.todoListRef()),
+                responseStatus = None
+            }
+        ),
         
-        Route.get("/todos/{id}", req -> 
-            run { Handlers.getTodo(req) } with TodoStore.runWithState(stateRef))
-            |> Route.withMetadata(
-                RouteMetadata.empty()
-                |> RouteMetadata.withSummary("Get a todo by ID")
-                |> RouteMetadata.withDescription("Retrieves a single todo item by its ID")
-                |> RouteMetadata.withTags("todos" :: Nil)
-                |> RouteMetadata.withResponse("The requested todo item")
-                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
-            ),
+        Route.getMeta("/todos/{id}",
+            req -> run { Handlers.getTodo(req) } with TodoStore.runWithState(stateRef),
+            {
+                summary = "Get a todo by ID",
+                description = "Retrieves a single todo item by its ID",
+                tags = "todos" :: Nil,
+                requestBody = None,
+                requestSchema = None,
+                response = Some("The requested todo item"),
+                responseSchema = Some(Schemas.todoRef()),
+                responseStatus = None
+            }
+        ),
         
-        Route.post("/todos", req -> 
-            run { Handlers.createTodo(req) } with TodoStore.runWithState(stateRef))
-            |> Route.withMetadata(
-                RouteMetadata.empty()
-                |> RouteMetadata.withSummary("Create a new todo")
-                |> RouteMetadata.withDescription("Creates a new todo item with the provided text")
-                |> RouteMetadata.withTags("todos" :: Nil)
-                |> RouteMetadata.withRequestBody("Todo item with 'text' field")
-                |> RouteMetadata.withRequestSchema(Schemas.createTodoRef())
-                |> RouteMetadata.withResponse("The created todo item")
-                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
-            ),
+        Route.postMeta("/todos",
+            req -> run { Handlers.createTodo(req) } with TodoStore.runWithState(stateRef),
+            {
+                summary = "Create a new todo",
+                description = "Creates a new todo item with the provided text",
+                tags = "todos" :: Nil,
+                requestBody = Some("Todo item with 'text' field"),
+                requestSchema = Some(Schemas.createTodoRef()),
+                response = Some("The created todo item"),
+                responseSchema = Some(Schemas.todoRef()),
+                responseStatus = None
+            }
+        ),
         
-        Route.put("/todos/{id}", req -> 
-            run { Handlers.updateTodo(req) } with TodoStore.runWithState(stateRef))
-            |> Route.withMetadata(
-                RouteMetadata.empty()
-                |> RouteMetadata.withSummary("Update a todo")
-                |> RouteMetadata.withDescription("Updates an existing todo item with new text and/or completion status")
-                |> RouteMetadata.withTags("todos" :: Nil)
-                |> RouteMetadata.withRequestBody("Updated todo item")
-                |> RouteMetadata.withRequestSchema(Schemas.todoRef())
-                |> RouteMetadata.withResponse("The updated todo item")
-                |> RouteMetadata.withResponseSchema(Schemas.todoRef())
-            ),
+        Route.putMeta("/todos/{id}",
+            req -> run { Handlers.updateTodo(req) } with TodoStore.runWithState(stateRef),
+            {
+                summary = "Update a todo",
+                description = "Updates an existing todo item with new text and/or completion status",
+                tags = "todos" :: Nil,
+                requestBody = Some("Updated todo item"),
+                requestSchema = Some(Schemas.todoRef()),
+                response = Some("The updated todo item"),
+                responseSchema = Some(Schemas.todoRef()),
+                responseStatus = None
+            }
+        ),
         
-        Route.delete("/todos/{id}", req -> 
-            run { Handlers.deleteTodo(req) } with TodoStore.runWithState(stateRef))
-            |> Route.withMetadata(
-                RouteMetadata.empty()
-                |> RouteMetadata.withSummary("Delete a todo")
-                |> RouteMetadata.withDescription("Deletes a todo item by its ID")
-                |> RouteMetadata.withTags("todos" :: Nil)
-                |> RouteMetadata.withResponseStatus(204)
-                |> RouteMetadata.withResponse("No content on successful deletion")
-            )
+        Route.deleteMeta("/todos/{id}",
+            req -> run { Handlers.deleteTodo(req) } with TodoStore.runWithState(stateRef),
+            {
+                summary = "Delete a todo",
+                description = "Deletes a todo item by its ID",
+                tags = "todos" :: Nil,
+                requestBody = None,
+                requestSchema = None,
+                response = Some("No content on successful deletion"),
+                responseSchema = None,
+                responseStatus = Some(204)
+            }
+        )
     };
     
     // Create API info for OpenAPI spec
