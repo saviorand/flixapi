@@ -13,17 +13,29 @@ A REST API framework for Flix with effect-oriented programming.
 ## Quick Start
 
 ```flix
-def main(): Unit \ IO = region rc {
-    let stateRef = Ref.fresh(rc, initialState);
-
+def main(): Unit \ IO = {
     let routes = List#{
-        Route.get("/todos", req -> Handlers.getAllTodos(req)),
-        Route.post("/todos", req -> Handlers.createTodo(req))
+        Route.get("/hello", _ -> Response.ok("Hello, World!")),
+        Route.get("/hello/{name}", req -> {
+            let Request.Request(r) = req;
+            match Map.get("name", r#pathParams) {
+                case Some(name) => Response.ok("Hello, ${name}!")
+                case None => Response.badRequest("Missing name")
+            }
+        })
     };
 
     Server.serve(8080, routes)
 }
 ```
+
+The framework provides:
+
+- **Route definition** - `Route.get`, `Route.post`, `Route.put`, `Route.delete`, `Route.patch`
+- **Request handling** - Access to path params, query params, and request body
+- **Response building** - `Response.ok`, `Response.created`, `Response.notFound`, etc.
+- **JSON support** - `Json.encode` and `Json.decode` with type class instances
+- **OpenAPI generation** - Add metadata to routes for automatic API documentation
 
 ## Examples
 
