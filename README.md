@@ -42,10 +42,6 @@ java -jar ../../flix.jar run
 
 Server starts at `http://localhost:8080` with API docs at `/api/docs`.
 
-## Documentation
-
-See [OPENAPI.md](OPENAPI.md) for OpenAPI features.
-
 ## License
 
 See LICENSE.md
