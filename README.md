@@ -45,11 +45,10 @@ See [examples/todo/](examples/todo/) for a complete Todo API demonstrating:
 - OpenAPI documentation
 - State management with regions
 
-Run the example:
+Run the example from the project root:
 
 ```bash
-cd examples/todo
-java -jar ../../flix.jar run
+java -jar flix.jar run examples/todo/Main.flix
 ```
 
 Server starts at `http://localhost:8080` with API docs at `/api/docs`.

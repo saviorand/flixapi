@@ -129,9 +129,60 @@ mod TodoStore {
 }
 
 ///
+/// API error types
+///
+enum ApiError {
+    case MissingParameter(String),
+    case InvalidFormat(String),
+    case NotFound(String),
+    case InvalidJson,
+    case MissingField(String),
+    case MissingBody
+}
+
+///
 /// API Handlers using TodoStore effect
 ///
 mod Handlers {
+    use ApiError.{MissingParameter, InvalidFormat, NotFound, InvalidJson, MissingField, MissingBody}
+
+    ///
+    /// Helper to convert Option to Validation
+    ///
+    def toValidation(opt: Option[a], err: ApiError): Validation[ApiError, a] =
+        match opt {
+            case Some(v) => Validation.Success(v)
+            case None => Validation.Failure(Nec.singleton(err))
+        }
+
+    ///
+    /// Helper to format error messages
+    ///
+    def formatError(err: ApiError): String =
+        match err {
+            case MissingParameter(name) => "Missing ${name} parameter"
+            case InvalidFormat(name) => "Invalid ${name} format"
+            case NotFound(msg) => msg
+            case InvalidJson => "Invalid JSON"
+            case MissingField(name) => "Missing '${name}' field"
+            case MissingBody => "Request body required"
+        }
+
+    ///
+    /// Helper to handle validation result
+    ///
+    def handleValidation(v: Validation[ApiError, a], onSuccess: a -> Response): Response =
+        match v {
+            case Validation.Success(value) => onSuccess(value)
+            case Validation.Failure(errors) => {
+                let firstError = Nec.head(errors);
+                match firstError {
+                    case NotFound(msg) => Response.notFound(msg)
+                    case _ => Response.badRequest(formatError(firstError))
+                }
+            }
+        }
+
     ///
     /// Get all todos
     ///
@@ -139,24 +190,18 @@ mod Handlers {
         let todos = TodoStore.getAll();
         Response.ok(Json.encode(todos))
     }
-    
+
     ///
     /// Get a single todo by ID
     ///
     pub def getTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
-        match Map.get("id", r#pathParams) {
-            case None => Response.badRequest("Missing id parameter")
-            case Some(idStr) => 
-                match Int32.fromString(idStr) {
-                    case None => Response.badRequest("Invalid id format")
-                    case Some(id) =>
-                        match TodoStore.getById(id) {
-                            case None => Response.notFound("Todo not found")
-                            case Some(todo) => Response.ok(Json.encode(todo))
-                        }
-                }
-        }
+        let result = forA (
+            idStr <- toValidation(Map.get("id", r#pathParams), MissingParameter("id"));
+            id <- toValidation(Int32.fromString(idStr), InvalidFormat("id"));
+            todo <- toValidation(TodoStore.getById(id), NotFound("Todo not found"))
+        ) yield todo;
+        handleValidation(result, todo -> Response.ok(Json.encode(todo)))
     }
     
     ///
@@ -164,22 +209,12 @@ mod Handlers {
     ///
     pub def createTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
-        match r#body {
-            case None => Response.badRequest("Request body required")
-            case Some(body) => {
-                let objOpt: Option[Map[String, String]] = Json.decode(body);
-                match objOpt {
-                    case None => Response.badRequest("Invalid JSON")
-                    case Some(obj) =>
-                        match Map.get("text", obj) {
-                            case None => Response.badRequest("Missing 'text' field")
-                            case Some(text) => 
-                                let newTodo = TodoStore.add(text);
-                                Response.created(Json.encode(newTodo))
-                        }
-                }
-            }
-        }
+        let result = forA (
+            body <- toValidation(r#body, MissingBody);
+            obj <- toValidation(Json.decode(body): Option[Map[String, String]], InvalidJson);
+            text <- toValidation(Map.get("text", obj), MissingField("text"))
+        ) yield TodoStore.add(text);
+        handleValidation(result, newTodo -> Response.created(Json.encode(newTodo)))
     }
     
     ///
@@ -187,28 +222,23 @@ mod Handlers {
     ///
     pub def updateTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
-        match Map.get("id", r#pathParams) {
-            case None => Response.badRequest("Missing id parameter")
-            case Some(idStr) => 
-                match Int32.fromString(idStr) {
-                    case None => Response.badRequest("Invalid id format")
-                    case Some(id) =>
-                        match r#body {
-                            case None => Response.badRequest("Request body required")
-                            case Some(body) => {
-                                let todoOpt: Option[Todo] = Json.decode(body);
-                                match todoOpt {
-                                    case None => Response.badRequest("Invalid JSON")
-                                    case Some(Todo.Todo(t)) => {
-                                        match TodoStore.update(id, t#text, t#completed) {
-                                            case None => Response.notFound("Todo not found")
-                                            case Some(updated) => Response.ok(Json.encode(updated))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                }
+        let result = forA (
+            idStr <- toValidation(Map.get("id", r#pathParams), MissingParameter("id"));
+            id <- toValidation(Int32.fromString(idStr), InvalidFormat("id"));
+            body <- toValidation(r#body, MissingBody);
+            todo <- toValidation(Json.decode(body): Option[Todo], InvalidJson)
+        ) yield {
+            let Todo.Todo(t) = todo;
+            TodoStore.update(id, t#text, t#completed)
+        };
+        match result {
+            case Validation.Success(optUpdated) =>
+                handleValidation(toValidation(optUpdated, NotFound("Todo not found")),
+                    updated -> Response.ok(Json.encode(updated)))
+            case Validation.Failure(errors) => {
+                let firstError = Nec.head(errors);
+                Response.badRequest(formatError(firstError))
+            }
         }
     }
     
@@ -217,18 +247,16 @@ mod Handlers {
     ///
     pub def deleteTodo(req: Request): Response \ TodoStore = {
         let Request.Request(r) = req;
-        match Map.get("id", r#pathParams) {
-            case None => Response.badRequest("Missing id parameter")
-            case Some(idStr) => 
-                match Int32.fromString(idStr) {
-                    case None => Response.badRequest("Invalid id format")
-                    case Some(id) =>
-                        if (TodoStore.delete(id))
-                            Response.noContent()
-                        else
-                            Response.notFound("Todo not found")
-                }
-        }
+        let result = forA (
+            idStr <- toValidation(Map.get("id", r#pathParams), MissingParameter("id"));
+            id <- toValidation(Int32.fromString(idStr), InvalidFormat("id"))
+        ) yield TodoStore.delete(id);
+        handleValidation(result, wasDeleted ->
+            if (wasDeleted)
+                Response.noContent()
+            else
+                Response.notFound("Todo not found")
+        )
     }
 }
 
