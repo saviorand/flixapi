@@ -229,7 +229,7 @@ mod OpenApi {
         baseOp
         |> insertOptional("summary", m#summary |> Option.map(JsonString))
         |> insertOptional("description", m#description |> Option.map(JsonString))
-        |> insertOptional("tags", if (List.isEmpty(m#tags)) None else Some(JsonArray(List.map(JsonString, m#tags))))
+        |> insertOptional("tags", if (List.isEmpty(m#tags)) None else Some(JsonArray(Vector.map(JsonString, m#tags |> List.toVector))))
         |> addRequestBodyIfNeeded(method, m#requestBodyDescription, m#requestSchema)
         |> addPathParametersIfNeeded(path)
         |> JsonObject
@@ -276,7 +276,7 @@ mod OpenApi {
         if (List.isEmpty(pathParams)) {
             m
         } else {
-            let paramArray = pathParams |> List.map(paramName -> JsonObject(Map#{
+            let paramArray = pathParams |> List.toVector |> Vector.map(paramName -> JsonObject(Map#{
                 "name" => JsonString(paramName),
                 "in" => JsonString("path"),
                 "required" => JsonBool(true),
